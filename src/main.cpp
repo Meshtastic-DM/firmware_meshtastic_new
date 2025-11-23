@@ -8,6 +8,7 @@
 #include "PowerFSM.h"
 #include "PowerMon.h"
 #include "ReliableRouter.h"
+#include "AODVRouter.h"
 #include "airtime.h"
 #include "buzz.h"
 
@@ -788,7 +789,13 @@ void setup()
     }
 #endif
 
+#ifdef USE_AODV_ROUTING
+    router = new AODVRouter();
+    LOG_INFO("Using AODV routing protocol");
+#else
     router = new ReliableRouter();
+    LOG_INFO("Using Reliable routing protocol");
+#endif
 
     // only play start melody when role is not tracker or sensor
     if (config.power.is_power_saving == true &&
