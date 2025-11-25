@@ -789,14 +789,37 @@ void setup()
     }
 #endif
 
-#ifdef USE_AODV_ROUTING
+ #ifdef USE_AODV_ROUTING
     router = new AODVRouter();
     LOG_INFO("Using AODV routing protocol");
-#else
+    ((AODVRouter*)router)->setAODVEnabled(true);
+    LOG_INFO("AODV Force Enabled");
+    
+    //  ADD THIS: Force disable sleep for ROUTER mode
+    if (config.device.role == meshtastic_Config_DeviceConfig_Role_ROUTER ||
+        config.device.role == meshtastic_Config_DeviceConfig_Role_ROUTER_CLIENT ||
+        config.device.role == meshtastic_Config_DeviceConfig_Role_ROUTER_LATE) {
+        
+        LOG_INFO("ROUTER mode detected - disabling sleep");
+        
+        // Disable power saving
+        config.power.is_power_saving = false;
+        
+        // Disable deep sleep
+        config.power.sds_secs = 0;
+        config.power.min_wake_secs = 0;
+        
+        // Keep screen on longer (or forever)
+        config.display.screen_on_secs = 0; // 0 = never sleep
+        
+        // Save config
+        //saveConfig();
+        
+        LOG_INFO("Sleep mode disabled for ROUTER");
+    }
+    #else
     router = new ReliableRouter();
-    LOG_INFO("Using Reliable routing protocol");
-#endif
-
+    #endif
     // only play start melody when role is not tracker or sensor
     if (config.power.is_power_saving == true &&
         IS_ONE_OF(config.device.role, meshtastic_Config_DeviceConfig_Role_TRACKER,
