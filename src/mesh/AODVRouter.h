@@ -98,6 +98,13 @@ class AODVRouter : public FloodingRouter
      * Constructor
      */
     AODVRouter();
+    
+    /**
+     * Enable or disable AODV routing at runtime
+     * When disabled, falls back to pure flooding
+     */
+    void setAODVEnabled(bool enabled) { aodvEnabled = enabled; }
+    bool isAODVEnabled() const { return aodvEnabled; }
 
     /**
      * Send a packet
@@ -140,6 +147,9 @@ class AODVRouter : public FloodingRouter
     
     // RREQ ID counter
     uint32_t rreqIdCounter;
+    
+    // Flag to enable/disable AODV (can be toggled at runtime)
+    bool aodvEnabled;
 
     // Route Discovery Methods
     void initiateRouteDiscovery(meshtastic_MeshPacket *p);

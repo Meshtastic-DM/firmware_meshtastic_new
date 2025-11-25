@@ -7,9 +7,28 @@
 #include "modules/RoutingModule.h"
 
 AODVRouter::AODVRouter() 
-    : FloodingRouter(), sequenceNumber(1), rreqIdCounter(1)
+    : FloodingRouter(), sequenceNumber(1), rreqIdCounter(1), aodvEnabled(true)
 {
     LOG_INFO("AODV Router initialized");
+    
+    // Auto-enable AODV based on device role
+    // AODV works best for ROUTER, ROUTER_CLIENT, ROUTER_LATE roles
+    // For CLIENT, CLIENT_MUTE, SENSOR, TRACKER - flooding might be better
+    auto role = config.device.role;
+    
+    if (role == meshtastic_Config_DeviceConfig_Role_ROUTER ||
+        role == meshtastic_Config_DeviceConfig_Role_ROUTER_CLIENT ||
+        role == meshtastic_Config_DeviceConfig_Role_ROUTER_LATE ||
+        role == meshtastic_Config_DeviceConfig_Role_CLIENT_BASE) {
+        aodvEnabled = true;
+        LOG_INFO("AODV enabled for role: %d (Router-type device)", role);
+    } else {
+        // For client-only devices, AODV might add unnecessary overhead
+        // You can force enable with setAODVEnabled(true) if needed
+        aodvEnabled = false;
+        LOG_INFO("AODV disabled for role: %d (Client-type device) - using flooding", role);
+        LOG_INFO("AODV can be enabled with setAODVEnabled(true) if needed");
+    }
 }
 
 /**
@@ -17,6 +36,11 @@ AODVRouter::AODVRouter()
  */
 ErrorCode AODVRouter::send(meshtastic_MeshPacket *p)
 {
+    // If AODV is disabled, use pure flooding
+    if (!aodvEnabled) {
+        return FloodingRouter::send(p);
+    }
+    
     // Don't route broadcast packets or packets without a destination
     if (p->to == NODENUM_BROADCAST || p->to == 0) {
         return FloodingRouter::send(p);
