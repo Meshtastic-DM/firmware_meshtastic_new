@@ -7,10 +7,16 @@
 #include "modules/RoutingModule.h"
 
 AODVRouter::AODVRouter() 
-    : FloodingRouter(), sequenceNumber(1), rreqIdCounter(1), aodvEnabled(true)
+    : FloodingRouter(), sequenceNumber(1), rreqIdCounter(1), aodvEnabled(true), lastRoutingTablePrint(0)
 {
     LOG_INFO("AODV Router initialized");
     
+    // FORCE ENABLE AODV FOR ALL ROLES (For Testing)
+    // Comment out this line and uncomment role-based logic below for production
+    aodvEnabled = true;
+    LOG_INFO("AODV FORCE ENABLED for all device roles");
+    
+    /* ROLE-BASED AODV ENABLE (Recommended for Production)
     // Auto-enable AODV based on device role
     // AODV works best for ROUTER, ROUTER_CLIENT, ROUTER_LATE roles
     // For CLIENT, CLIENT_MUTE, SENSOR, TRACKER - flooding might be better
@@ -29,6 +35,7 @@ AODVRouter::AODVRouter()
         LOG_INFO("AODV disabled for role: %d (Client-type device) - using flooding", role);
         LOG_INFO("AODV can be enabled with setAODVEnabled(true) if needed");
     }
+    */
 }
 
 /**
@@ -422,6 +429,8 @@ bool AODVRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
  */
 int32_t AODVRouter::runOnce()
 {
+    uint32_t now = millis();
+    
     // Process pending RREQs (retries and timeouts)
     processPendingRREQs();
     
@@ -430,6 +439,12 @@ int32_t AODVRouter::runOnce()
     
     // Clean up old RREQ cache entries
     cleanRREQCache();
+    
+    // Print routing table every 60 seconds (1 minute)
+    if (now - lastRoutingTablePrint > 60000) {
+        printRoutingTable();
+        lastRoutingTablePrint = now;
+    }
     
     // Call parent
     return FloodingRouter::runOnce();
@@ -651,4 +666,58 @@ void AODVRouter::sendAODVMessage(const meshtastic_Routing *routing, NodeNum to, 
     
     // Send via base class (don't use our send() to avoid recursion)
     FloodingRouter::send(p);
+}
+
+/**
+ * Print routing table for debugging
+ */
+void AODVRouter::printRoutingTable()
+{
+    uint32_t now = millis();
+    int totalRoutes = routingTable.size();
+    int validRoutes = 0;
+    int expiredRoutes = 0;
+    
+    LOG_INFO("=== AODV Routing Table ===");
+    LOG_INFO("AODV Status: %s", aodvEnabled ? "ENABLED" : "DISABLED");
+    LOG_INFO("Total Routes: %d", totalRoutes);
+    
+    if (totalRoutes == 0) {
+        LOG_INFO("No routes in table");
+        LOG_INFO("==========================");
+        return;
+    }
+    
+    LOG_INFO("%-12s %-12s %-8s %-8s %-8s %-12s", 
+             "Destination", "NextHop", "HopCount", "SeqNum", "Valid", "Lifetime(s)");
+    LOG_INFO("------------------------------------------------------------------------");
+    
+    for (auto &entry : routingTable) {
+        NodeNum dest = entry.first;
+        AODVRouteEntry &route = entry.second;
+        
+        bool isValid = route.routeValid && (route.lifetime == 0 || route.lifetime > now);
+        if (isValid) {
+            validRoutes++;
+        } else {
+            expiredRoutes++;
+        }
+        
+        int remainingTime = 0;
+        if (route.lifetime > now) {
+            remainingTime = (route.lifetime - now) / 1000;
+        }
+        
+        LOG_INFO("0x%08x   0x%08x   %-8d %-8d %-8s %-12d", 
+                 dest,
+                 route.nextHop,
+                 route.hopCount,
+                 route.destSeqNum,
+                 isValid ? "YES" : "NO",
+                 remainingTime);
+    }
+    
+    LOG_INFO("------------------------------------------------------------------------");
+    LOG_INFO("Summary: Valid=%d, Expired=%d, Total=%d", validRoutes, expiredRoutes, totalRoutes);
+    LOG_INFO("==========================");
 }

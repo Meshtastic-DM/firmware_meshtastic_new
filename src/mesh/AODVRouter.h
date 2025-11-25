@@ -150,6 +150,9 @@ class AODVRouter : public FloodingRouter
     
     // Flag to enable/disable AODV (can be toggled at runtime)
     bool aodvEnabled;
+    
+    // Last time we printed the routing table (for periodic logging)
+    uint32_t lastRoutingTablePrint;
 
     // Route Discovery Methods
     void initiateRouteDiscovery(meshtastic_MeshPacket *p);
@@ -182,4 +185,7 @@ class AODVRouter : public FloodingRouter
     
     // Forward packet using discovered route
     ErrorCode forwardWithRoute(meshtastic_MeshPacket *p, const AODVRouteEntry *route);
+    
+    // Print routing table to serial monitor (for debugging)
+    void printRoutingTable();
 };
