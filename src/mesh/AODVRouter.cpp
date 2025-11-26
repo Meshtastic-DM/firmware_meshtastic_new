@@ -11,35 +11,31 @@ AODVRouter::AODVRouter()
 {
     LOG_INFO("AODV Router initialized");
     
-    // FORCE ENABLE AODV FOR ALL ROLES (For Testing)
-    // Comment out this line and uncomment role-based logic below for production
-    aodvEnabled = true;
-    LOG_INFO("AODV FORCE ENABLED for all device roles");
+    // HYBRID ROUTING: Enable AODV for ALL roles
+    // - UNICAST messages (direct messaging) use AODV route discovery
+    // - BROADCAST messages use traditional flooding
+    // This gives best of both worlds: efficient unicast + reliable broadcast
     
-    /* ROLE-BASED AODV ENABLE (Recommended for Production)
-    // Auto-enable AODV based on device role
-    // AODV works best for ROUTER, ROUTER_CLIENT, ROUTER_LATE roles
-    // For CLIENT, CLIENT_MUTE, SENSOR, TRACKER - flooding might be better
     auto role = config.device.role;
+    
+    // Always enable AODV - it's smart enough to use flooding when appropriate
+    aodvEnabled = true;
     
     if (role == meshtastic_Config_DeviceConfig_Role_ROUTER ||
         role == meshtastic_Config_DeviceConfig_Role_ROUTER_CLIENT ||
         role == meshtastic_Config_DeviceConfig_Role_ROUTER_LATE ||
         role == meshtastic_Config_DeviceConfig_Role_CLIENT_BASE) {
-        aodvEnabled = true;
-        LOG_INFO("AODV enabled for role: %d (Router-type device)", role);
+        LOG_INFO("AODV enabled for ROUTER role %d - full routing capability", role);
     } else {
-        // For client-only devices, AODV might add unnecessary overhead
-        // You can force enable with setAODVEnabled(true) if needed
-        aodvEnabled = false;
-        LOG_INFO("AODV disabled for role: %d (Client-type device) - using flooding", role);
-        LOG_INFO("AODV can be enabled with setAODVEnabled(true) if needed");
+        LOG_INFO("AODV enabled for CLIENT role %d - hybrid mode (AODV unicast + flooding broadcast)", role);
     }
-    */
 }
 
 /**
  * Send a packet using AODV routing
+ * HYBRID APPROACH:
+ * - Broadcast packets: Use flooding (reliable for group messages)
+ * - Unicast packets: Use AODV route discovery (efficient for direct messages)
  */
 ErrorCode AODVRouter::send(meshtastic_MeshPacket *p)
 {
@@ -48,17 +44,22 @@ ErrorCode AODVRouter::send(meshtastic_MeshPacket *p)
         return FloodingRouter::send(p);
     }
     
-    // Don't route broadcast packets or packets without a destination
+    // ALWAYS use flooding for broadcast packets
+    // Reason: Broadcasts need to reach everyone, flooding is more reliable
     if (p->to == NODENUM_BROADCAST || p->to == 0) {
+        LOG_DEBUG("AODV: Broadcast packet, using flooding");
         return FloodingRouter::send(p);
     }
 
+    // For UNICAST packets (direct messages), use AODV routing
+    LOG_DEBUG("AODV: Unicast packet to 0x%x, attempting route discovery", p->to);
+    
     // Find route to destination
     AODVRouteEntry *route = findRoute(p->to);
     
     if (route && route->routeValid) {
         // We have a valid route, use it
-        LOG_DEBUG("AODV: Valid route found to 0x%x via 0x%x (hops: %d)", 
+        LOG_INFO("AODV: Valid route found to 0x%x via 0x%x (hops: %d)", 
                   p->to, route->nextHop, route->hopCount);
         route->lastUsedTime = millis();
         return forwardWithRoute(p, route);
