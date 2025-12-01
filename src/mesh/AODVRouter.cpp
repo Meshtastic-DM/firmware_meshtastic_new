@@ -113,7 +113,7 @@ void AODVRouter::initiateRouteDiscovery(meshtastic_MeshPacket *p)
     pending.rreqId = getNextRREQId();
     pending.ttl = 3; // Start with TTL of 3
     pending.retryCount = 0;
-    pending.nextRetryTime = millis() + AODV_NET_TRAVERSAL_TIME;
+    pending.nextRetryTime = millis() + AODV_NET_TRAVERSAL_TIME;  //need to change according to maximum time takes to go through the network in worst case scenario
     pending.bufferedPacket = p;
     
     pendingRREQs[destination] = pending;

@@ -5,7 +5,7 @@
 #include <map>
 
 // AODV Protocol Constants
-#define AODV_ACTIVE_ROUTE_TIMEOUT 3000    // 3 seconds
+#define AODV_ACTIVE_ROUTE_TIMEOUT 300000    //5 minutes
 #define AODV_NET_TRAVERSAL_TIME 2000      // 2 seconds  
 #define AODV_NODE_TRAVERSAL_TIME 40       // 40 milliseconds
 #define AODV_RREQ_RETRIES 2               // Number of RREQ retries
