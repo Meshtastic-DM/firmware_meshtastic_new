@@ -295,11 +295,27 @@ void AODVRouter::handleRREP(const meshtastic_MeshPacket *p, const meshtastic_Rou
     if (it != pendingRREQs.end() && it->second.rreqId == rreqId) {
         LOG_INFO("AODV: Route discovery complete for 0x%x", destination);
         
-        // Send buffered packet if any
-        sendBufferedPacket(destination);
+        // Extract buffered packet BEFORE erasing from map (FIX: prevents use-after-erase)
+        meshtastic_MeshPacket *bufferedPacket = it->second.bufferedPacket;
+        it->second.bufferedPacket = nullptr; // Clear reference to prevent double-free
         
-        // Remove from pending
+        // Remove from pending RREQs NOW (before sending)
         pendingRREQs.erase(it);
+        
+        // Now send the buffered packet using the discovered route
+        if (bufferedPacket) {
+            LOG_INFO("AODV: Sending buffered packet to 0x%x", destination);
+            
+            // Send the packet (will use the newly discovered route)
+            ErrorCode result = send(bufferedPacket);
+            
+            if (result != ERRNO_OK) {
+                LOG_WARN("AODV: Failed to send buffered packet, result=%d", result);
+            }
+        } else {
+            LOG_DEBUG("AODV: No buffered packet to send");
+        }
+        
         return;
     }
     
@@ -602,18 +618,24 @@ void AODVRouter::processPendingRREQs()
 
 /**
  * Send buffered packet after route discovery
+ * NOTE: This function is now deprecated - buffered packets are sent directly in handleRREP
+ * Kept for backward compatibility but should not be called
  */
 void AODVRouter::sendBufferedPacket(NodeNum destination)
 {
     auto it = pendingRREQs.find(destination);
     if (it != pendingRREQs.end() && it->second.bufferedPacket) {
-        LOG_INFO("AODV: Sending buffered packet to 0x%x", destination);
+        LOG_WARN("AODV: sendBufferedPacket called (should be handled in handleRREP)");
         
         meshtastic_MeshPacket *p = it->second.bufferedPacket;
         it->second.bufferedPacket = nullptr; // Clear reference before sending
         
         // Now send the packet (will use the newly discovered route)
-        send(p);
+        ErrorCode result = send(p);
+        
+        if (result != ERRNO_OK) {
+            LOG_WARN("AODV: Failed to send buffered packet, result=%d", result);
+        }
     }
 }
 
