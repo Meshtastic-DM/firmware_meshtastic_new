@@ -605,6 +605,20 @@ void AODVRouter::processPendingRREQs()
     
     for (auto it = pendingRREQs.begin(); it != pendingRREQs.end(); ) {
         if (now >= it->second.nextRetryTime) {
+            // Check if we now have a valid route (RREP might have arrived)
+            AODVRouteEntry *route = findRoute(it->second.destination);
+            if (route && route->routeValid) {
+                LOG_DEBUG("AODV: Route now available for 0x%x, canceling pending RREQ", it->second.destination);
+                
+                // Free buffered packet if it exists (should have been sent by handleRREP)
+                if (it->second.bufferedPacket) {
+                    packetPool.release(it->second.bufferedPacket);
+                }
+                
+                it = pendingRREQs.erase(it);
+                continue;
+            }
+            
             if (it->second.retryCount < AODV_RREQ_RETRIES) {
                 // Retry with expanded TTL
                 it->second.retryCount++;
