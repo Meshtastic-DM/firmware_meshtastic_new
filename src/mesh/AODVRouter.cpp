@@ -52,7 +52,7 @@ ErrorCode AODVRouter::send(meshtastic_MeshPacket *p)
     }
 
     // For UNICAST packets (direct messages), use AODV routing
-    LOG_DEBUG("AODV: Unicast packet to 0x%x, attempting route discovery", p->to);
+    LOG_INFO("AODV: Unicast packet to 0x%x, from 0x%x, id=%d", p->to, p->from, p->id);
     
     // Find route to destination
     AODVRouteEntry *route = findRoute(p->to);
@@ -62,10 +62,11 @@ ErrorCode AODVRouter::send(meshtastic_MeshPacket *p)
         LOG_INFO("AODV: Valid route found to 0x%x via 0x%x (hops: %d)", 
                   p->to, route->nextHop, route->hopCount);
         route->lastUsedTime = millis();
+        LOG_INFO("AODV: Forwarding packet id=%d to next_hop 0x%x", p->id, route->nextHop);
         return forwardWithRoute(p, route);
     } else {
         // No valid route, initiate route discovery
-        LOG_INFO("AODV: No route to 0x%x, initiating route discovery", p->to);
+        LOG_INFO("AODV: No route to 0x%x, initiating route discovery for packet id=%d", p->to, p->id);
         initiateRouteDiscovery(p);
         return ERRNO_OK; // Packet will be sent when route is discovered
     }
@@ -76,6 +77,8 @@ ErrorCode AODVRouter::send(meshtastic_MeshPacket *p)
  */
 ErrorCode AODVRouter::forwardWithRoute(meshtastic_MeshPacket *p, const AODVRouteEntry *route)
 {
+    LOG_INFO("AODV: forwardWithRoute() called for packet id=%d to dest 0x%x", p->id, p->to);
+    
     // Set next hop preference
     p->next_hop = route->nextHop;
     
@@ -84,8 +87,13 @@ ErrorCode AODVRouter::forwardWithRoute(meshtastic_MeshPacket *p, const AODVRoute
         p->hop_limit = route->hopCount + 2; // Add margin
     }
     
+    LOG_INFO("AODV: Sending packet id=%d via FloodingRouter, next_hop=0x%x, hop_limit=%d", 
+             p->id, p->next_hop, p->hop_limit);
+    
     // Send via base router
-    return FloodingRouter::send(p);
+    ErrorCode result = FloodingRouter::send(p);
+    LOG_INFO("AODV: FloodingRouter::send() returned result=%d for packet id=%d", result, p->id);
+    return result;
 }
 
 /**
@@ -117,6 +125,9 @@ void AODVRouter::initiateRouteDiscovery(meshtastic_MeshPacket *p)
     pending.bufferedPacket = p;
     
     pendingRREQs[destination] = pending;
+    
+    LOG_INFO("AODV: Buffered packet id=%d for dest 0x%x, sending RREQ id=%d", 
+             p->id, destination, pending.rreqId);
     
     // Send RREQ
     sendRREQ(destination, pending.ttl);
@@ -157,12 +168,14 @@ void AODVRouter::sendRREQ(NodeNum destination, uint8_t ttl)
     // route[2] = Destination Sequence Number (if valid)
     // route[3] = Hop Count (starts at 0)
     // route[4] = Flags (bit 0: has dest seq num)
+    // route[5] = Destination Node Number (CRITICAL: needed since p->to is broadcast)
     rreq->route[0] = it->second.rreqId;
     rreq->route[1] = getNextSequenceNumber();
     rreq->route[2] = destSeqNum;
     rreq->route[3] = 0; // Hop count starts at 0
     rreq->route[4] = hasDestSeqNum ? 1 : 0;
-    rreq->route_count = 5;
+    rreq->route[5] = destination; // Add destination node number
+    rreq->route_count = 6;
     
     // Add to RREQ cache
     addRREQToCache(nodeDB->getNodeNum(), it->second.rreqId);
@@ -178,7 +191,7 @@ void AODVRouter::handleRREQ(const meshtastic_MeshPacket *p, const meshtastic_Rou
 {
     const meshtastic_RouteDiscovery *rreq = &routing->route_request;
     
-    if (rreq->route_count < 5) {
+    if (rreq->route_count < 6) {
         LOG_WARN("AODV: Invalid RREQ format");
         return;
     }
@@ -188,9 +201,9 @@ void AODVRouter::handleRREQ(const meshtastic_MeshPacket *p, const meshtastic_Rou
     uint32_t destSeqNum = rreq->route[2];
     uint8_t hopCount = (uint8_t)rreq->route[3];
     bool hasDestSeqNum = rreq->route[4] != 0;
+    NodeNum destination = rreq->route[5]; // CRITICAL FIX: Get destination from payload, not p->to (which is broadcast)
     
     NodeNum originator = getFrom(p);
-    NodeNum destination = p->to;
     
     LOG_DEBUG("AODV: Received RREQ id=%u from 0x%x to 0x%x (hops=%d)", 
               rreqId, originator, destination, hopCount);
@@ -304,16 +317,20 @@ void AODVRouter::handleRREP(const meshtastic_MeshPacket *p, const meshtastic_Rou
         
         // Now send the buffered packet using the discovered route
         if (bufferedPacket) {
-            LOG_INFO("AODV: Sending buffered packet to 0x%x", destination);
+            LOG_INFO("AODV: Sending buffered packet id=%d to 0x%x (after route discovery)", 
+                     bufferedPacket->id, destination);
             
             // Send the packet (will use the newly discovered route)
             ErrorCode result = send(bufferedPacket);
             
             if (result != ERRNO_OK) {
-                LOG_WARN("AODV: Failed to send buffered packet, result=%d", result);
+                LOG_WARN("AODV: Failed to send buffered packet id=%d, result=%d", 
+                         bufferedPacket->id, result);
+            } else {
+                LOG_INFO("AODV: Successfully sent buffered packet id=%d", bufferedPacket->id);
             }
         } else {
-            LOG_DEBUG("AODV: No buffered packet to send");
+            LOG_WARN("AODV: No buffered packet to send for dest 0x%x (this is unusual!)", destination);
         }
         
         return;
