@@ -704,6 +704,11 @@ void AODVRouter::sendAODVMessage(const meshtastic_Routing *routing, NodeNum to, 
     p->hop_limit = hopLimit;
     p->priority = meshtastic_MeshPacket_Priority_RELIABLE;
     
+    //  FIX: Set relay_node to track the path correctly
+    // This allows intermediate nodes to know who the previous hop was
+    // Critical for AODV reverse route creation
+    p->relay_node = nodeDB->getNodeNum();
+    
     // Encode routing message
     p->decoded.payload.size = pb_encode_to_bytes(
         p->decoded.payload.bytes, 
