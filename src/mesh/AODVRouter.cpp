@@ -43,15 +43,20 @@ ErrorCode AODVRouter::send(meshtastic_MeshPacket *p)
     if (!aodvEnabled) {
         return FloodingRouter::send(p);
     }
-    
-    // ALWAYS use flooding for broadcast packets
-    // Reason: Broadcasts need to reach everyone, flooding is more reliable
+
+    /* ALWAYS use flooding for broadcast packets
+        * Reason: Broadcasts need to reach everyone, flooding is more reliable
+    */
+
     if (p->to == NODENUM_BROADCAST || p->to == 0) {
         LOG_DEBUG("AODV: Broadcast packet, using flooding");
         return FloodingRouter::send(p);
     }
 
-    // For UNICAST packets (direct messages), use AODV routing
+    /* 
+        For UNICAST packets (direct messages), use AODV routing
+    */
+    
     LOG_INFO("AODV: Unicast packet to 0x%x, from 0x%x, id=%d", p->to, p->from, p->id);
     
     // Find route to destination
@@ -83,7 +88,7 @@ ErrorCode AODVRouter::forwardWithRoute(meshtastic_MeshPacket *p, const AODVRoute
     p->next_hop = route->nextHop;
     
     // Update hop limit based on known hop count
-    if (p->hop_limit == 0 || p->hop_limit > route->hopCount + 2) {
+    if (p->hop_limit == 0 || p->hop_limit < route->hopCount + 2) {
         p->hop_limit = route->hopCount + 2; // Add margin
     }
     
@@ -116,9 +121,12 @@ void AODVRouter::initiateRouteDiscovery(meshtastic_MeshPacket *p)
     }
     
     // Create new pending RREQ
+    // IMPORTANT: RREQ ID is assigned HERE and will be reused for ALL retries
+    // Only when this pending RREQ is removed (timeout or success) and a NEW
+    // route discovery is initiated will a new RREQ ID be allocated
     PendingRREQ pending;
     pending.destination = destination;
-    pending.rreqId = getNextRREQId();
+    pending.rreqId = getNextRREQId(); // Allocate NEW RREQ ID for this route discovery
     pending.ttl = 3; // Start with TTL of 3
     pending.retryCount = 0;
     pending.nextRetryTime = millis() + AODV_NET_TRAVERSAL_TIME;  //need to change according to maximum time takes to go through the network in worst case scenario
@@ -162,36 +170,45 @@ void AODVRouter::sendRREQ(NodeNum destination, uint8_t ttl)
     meshtastic_RouteDiscovery *rreq = &routing.route_request;
     rreq->route_count = 0; // Empty route initially
     
-    // We'll encode AODV-specific data in the route array as follows:
-    // route[0] = RREQ ID
-    // route[1] = Originator Sequence Number
-    // route[2] = Destination Sequence Number (if valid)
-    // route[3] = Hop Count (starts at 0)
-    // route[4] = Flags (bit 0: has dest seq num)
-    // route[5] = Destination Node Number (CRITICAL: needed since p->to is broadcast)
+    /*
+    
+        We'll encode AODV-specific data in the route array as follows:
+        route[0] = RREQ ID
+        route[1] = Originator Sequence Number
+        route[2] = Destination Sequence Number (if valid)
+        route[3] = Hop Count (starts at 0)
+        route[4] = Flags (bit 0: has dest seq num)
+        route[5] = Destination Node Number (CRITICAL: needed since p->to is broadcast)
+        route[6] = Originator Node Number
+    
+    */
+
     rreq->route[0] = it->second.rreqId;
     rreq->route[1] = getNextSequenceNumber();
     rreq->route[2] = destSeqNum;
-    rreq->route[3] = 0; // Hop count starts at 0
+    rreq->route[3] = 0;          // Hop count starts at 0
     rreq->route[4] = hasDestSeqNum ? 1 : 0;
-    rreq->route[5] = destination; // Add destination node number
-    rreq->route_count = 6;
-    
+    rreq->route[5] = destination;               // Add destination node number
+    rreq->route[6] = nodeDB->getNodeNum();      // Add originator node number
+    rreq->route_count = 7;
+
     // Add to RREQ cache
     addRREQToCache(nodeDB->getNodeNum(), it->second.rreqId);
     
-    // Send RREQ as broadcast
+    // Send RREQ as broadcast packet
     sendAODVMessage(&routing, NODENUM_BROADCAST, ttl);
 }
+
 
 /**
  * Handle received RREQ
  */
+
 void AODVRouter::handleRREQ(const meshtastic_MeshPacket *p, const meshtastic_Routing *routing)
 {
     const meshtastic_RouteDiscovery *rreq = &routing->route_request;
     
-    if (rreq->route_count < 6) {
+    if (rreq->route_count < 7) {
         LOG_WARN("AODV: Invalid RREQ format");
         return;
     }
@@ -201,27 +218,42 @@ void AODVRouter::handleRREQ(const meshtastic_MeshPacket *p, const meshtastic_Rou
     uint32_t destSeqNum = rreq->route[2];
     uint8_t hopCount = (uint8_t)rreq->route[3];
     bool hasDestSeqNum = rreq->route[4] != 0;
-    NodeNum destination = rreq->route[5]; // CRITICAL FIX: Get destination from payload, not p->to (which is broadcast)
-    
-    NodeNum originator = getFrom(p);
+    NodeNum destination = rreq->route[5];   // Extract destination node number
+    NodeNum originator = rreq->route[6];    // Extract originator node number
+
+    NodeNum prevHop = p->from;                  // Get previous hop from 'from' field
+    NodeNum thisNode = nodeDB->getNodeNum();    // current node 
     
     LOG_DEBUG("AODV: Received RREQ id=%u from 0x%x to 0x%x (hops=%d)", 
               rreqId, originator, destination, hopCount);
     
     // Check if we've already seen this RREQ
     if (isRREQCached(originator, rreqId)) {
-        LOG_DEBUG("AODV: RREQ already processed, ignoring");
+        LOG_WARN("AODV: RREQ already processed, ignoring");
         return;
     }
-    
-    // Add to cache
+
     addRREQToCache(originator, rreqId);
-    
-    // Create/update reverse route to originator
-    NodeNum prevHop = p->relay_node != 0 ? p->relay_node : originator;
-    addRoute(originator, prevHop, hopCount + 1, origSeqNum, 
-             millis() + AODV_ACTIVE_ROUTE_TIMEOUT);
-    
+
+    /*
+        Create reverse route to originator in the destination's routing table if hop count is less than existing one
+    */
+    AODVRouteEntry *routeToOriginator = findRoute(originator);
+    if (routeToOriginator && routeToOriginator->routeValid) {
+        
+        if (hopCount + 1 < routeToOriginator->hopCount)
+        {
+            LOG_INFO("AODV: Updating route to originator 0x%x via 0x%x", originator, prevHop);
+            updateRoute(originator, prevHop, hopCount + 1, origSeqNum,
+                        millis() + AODV_ACTIVE_ROUTE_TIMEOUT);
+        }
+    } 
+    else {
+        LOG_INFO("AODV: Adding route to originator 0x%x via 0x%x", originator, prevHop);
+        addRoute(originator, prevHop, hopCount + 1, origSeqNum,
+                 millis() + AODV_ACTIVE_ROUTE_TIMEOUT);
+    }
+
     // Are we the destination?
     if (destination == nodeDB->getNodeNum()) {
         LOG_INFO("AODV: We are the destination, sending RREP");
@@ -234,36 +266,19 @@ void AODVRouter::handleRREQ(const meshtastic_MeshPacket *p, const meshtastic_Rou
         rrep->route[0] = rreqId;
         rrep->route[1] = getNextSequenceNumber(); // Our sequence number
         rrep->route[2] = 0; // Hop count from destination (starts at 0)
-        rrep->route_count = 3;
-        
-        sendAODVMessage(&replyRouting, originator, hopCount + 2);
+        rrep->route[3] = originator; // FIX: Store RREQ originator for proper RREP forwarding
+        rrep->route[4] = destination; // Include destination node number for RREQ
+        rrep->route_count = 5; // Changed to 5
+
+        //Add to RREP cache
+        addRREPToCache(originator, rreqId);
+
+        sendAODVMessage(&replyRouting, prevHop, hopCount + 2);
         return;
     }
-    
-    // Do we have a valid route to the destination?
-    AODVRouteEntry *destRoute = findRoute(destination);
-    if (destRoute && destRoute->routeValid && destRoute->validDestSeqNum) {
-        // Check if our route is fresh enough
-        if (!hasDestSeqNum || destRoute->destSeqNum >= destSeqNum) {
-            LOG_INFO("AODV: Have valid route to dest, sending intermediate RREP");
-            
-            // Send RREP as intermediate node
-            meshtastic_Routing replyRouting = meshtastic_Routing_init_zero;
-            replyRouting.which_variant = meshtastic_Routing_route_reply_tag;
-            
-            meshtastic_RouteDiscovery *rrep = &replyRouting.route_reply;
-            rrep->route[0] = rreqId;
-            rrep->route[1] = destRoute->destSeqNum;
-            rrep->route[2] = destRoute->hopCount;
-            rrep->route_count = 3;
-            
-            sendAODVMessage(&replyRouting, originator, hopCount + 2);
-            return;
-        }
-    }
-    
-    // Forward RREQ
-    if (p->hop_limit > 1) {
+
+    // Forward RREQ if hop limit allows greater than 0
+    if (p->hop_limit > 0) {
         LOG_DEBUG("AODV: Forwarding RREQ");
         
         meshtastic_Routing fwdRouting = meshtastic_Routing_init_zero;
@@ -284,29 +299,63 @@ void AODVRouter::handleRREP(const meshtastic_MeshPacket *p, const meshtastic_Rou
 {
     const meshtastic_RouteDiscovery *rrep = &routing->route_reply;
     
-    if (rrep->route_count < 3) {
-        LOG_WARN("AODV: Invalid RREP format");
+    // FIX: Updated validation for 4 fields (including originator)
+    if (rrep->route_count < 5) {
+        LOG_WARN("AODV: Invalid RREP format (route_count=%d, expected 4)", rrep->route_count);
         return;
     }
     
     uint32_t rreqId = rrep->route[0];
     uint32_t destSeqNum = rrep->route[1];
     uint8_t hopCount = (uint8_t)rrep->route[2];
+    NodeNum rreqOriginator = rrep->route[3]; // FIX: Extract RREQ originator from payload
+    NodeNum rreqDestination = rrep->route[4]; // Extract destination node number of RREQ
+    NodeNum thisNode = nodeDB->getNodeNum(); // Current node
+    NodeNum prevHop = p->from; // Get previous hop from 'from' field
+
+    //need to cache the RREP in the node to prevent processing duplicate RREPs
     
-    NodeNum destination = getFrom(p);
-    NodeNum nextHop = p->relay_node != 0 ? p->relay_node : destination;
+    LOG_INFO("AODV: Received RREP from 0x%x (hops=%d, seq=%u, originator=0x%x)", 
+             rreqDestination, hopCount, destSeqNum, rreqOriginator);
+
     
-    LOG_INFO("AODV: Received RREP from 0x%x (hops=%d, seq=%u)", 
-             destination, hopCount, destSeqNum);
+    if (isRREPCached(rreqOriginator, rreqId)) {
+        LOG_WARN("AODV: RREP already processed, ignoring");
+        return;
+    }
+
+    addRREPToCache(rreqOriginator, rreqId);
+
+    /*
+        Create/Update route to destination in routing table
+    */
+
+    //add route to routing table to originator if hop count is better or route does not exist
+    AODVRouteEntry *existingRoute = findRoute(rreqDestination);
+    if (existingRoute && existingRoute->routeValid) { 
+        if (hopCount + 1 < existingRoute->hopCount){
+
+            LOG_INFO("AODV: Updating route to RREQ destination 0x%x via 0x%x", 
+                    rreqDestination, prevHop);
+            updateRoute(rreqDestination, prevHop, hopCount + 1, destSeqNum,
+                        millis() + AODV_ACTIVE_ROUTE_TIMEOUT);
+
+        } 
+        
+    } 
+    else {
+        LOG_INFO("AODV: Adding route to RREQ Destination 0x%x via 0x%x", 
+                    rreqDestination, prevHop);
+        addRoute(rreqDestination, prevHop, hopCount + 1, destSeqNum,
+            millis() + AODV_ACTIVE_ROUTE_TIMEOUT);
+    }
     
-    // Create/update forward route to destination
-    addRoute(destination, nextHop, hopCount + 1, destSeqNum,
-             millis() + AODV_ACTIVE_ROUTE_TIMEOUT);
-    
-    // Are we the originator of the RREQ?
-    auto it = pendingRREQs.find(destination);
-    if (it != pendingRREQs.end() && it->second.rreqId == rreqId) {
-        LOG_INFO("AODV: Route discovery complete for 0x%x", destination);
+    // Check if we are the RREQ originator using payload data
+    // CRITICAL: Look up pending RREQ using rreqDestination (the destination we were trying to reach)
+    // and verify this node is the RREQ originator AND the RREQ ID matches
+    auto it = pendingRREQs.find(rreqDestination);
+    if (it != pendingRREQs.end() && it->second.rreqId == rreqId && thisNode == rreqOriginator) {
+        LOG_INFO("AODV: Route discovery complete for 0x%x (RREQ ID=%d matched)", rreqDestination, rreqId);
         
         // Extract buffered packet BEFORE erasing from map (FIX: prevents use-after-erase)
         meshtastic_MeshPacket *bufferedPacket = it->second.bufferedPacket;
@@ -318,7 +367,7 @@ void AODVRouter::handleRREP(const meshtastic_MeshPacket *p, const meshtastic_Rou
         // Now send the buffered packet using the discovered route
         if (bufferedPacket) {
             LOG_INFO("AODV: Sending buffered packet id=%d to 0x%x (after route discovery)", 
-                     bufferedPacket->id, destination);
+                     bufferedPacket->id, rreqDestination);
             
             // Send the packet (will use the newly discovered route)
             ErrorCode result = send(bufferedPacket);
@@ -329,29 +378,41 @@ void AODVRouter::handleRREP(const meshtastic_MeshPacket *p, const meshtastic_Rou
             } else {
                 LOG_INFO("AODV: Successfully sent buffered packet id=%d", bufferedPacket->id);
             }
-        } else {
-            LOG_WARN("AODV: No buffered packet to send for dest 0x%x (this is unusual!)", destination);
+        } 
+        else {
+            LOG_WARN("AODV: No buffered packet to send for dest 0x%x (this is unusual!)", rreqDestination);
         }
         
         return;
     }
     
-    // Forward RREP towards originator if we're an intermediate node
-    if (p->to != nodeDB->getNodeNum() && p->hop_limit > 1) {
-        NodeNum rrep_dest = p->to;
-        AODVRouteEntry *route = findRoute(rrep_dest);
+    // need to add the part if hop know the originator then forward the RREP towards originator
+    //need to check routing table for originator
+    AODVRouteEntry *originatorRoute = findRoute(rreqOriginator);
+    if (originatorRoute) {
+        LOG_INFO("AODV: Found route to RREQ originator 0x%x via 0x%x", 
+                 rreqOriginator, originatorRoute->nextHop);
         
-        if (route && route->routeValid) {
-            LOG_DEBUG("AODV: Forwarding RREP to 0x%x via 0x%x", rrep_dest, route->nextHop);
-            
-            meshtastic_Routing fwdRouting = meshtastic_Routing_init_zero;
-            fwdRouting.which_variant = meshtastic_Routing_route_reply_tag;
-            fwdRouting.route_reply = *rrep;
-            fwdRouting.route_reply.route[2] = hopCount + 1;
-            
-            sendAODVMessage(&fwdRouting, rrep_dest, p->hop_limit - 1);
-        }
+        uint8_t hopCountToOriginator = originatorRoute->hopCount;
+        sendRREP(originatorRoute->nextHop, rrep, hopCountToOriginator);
+
+    } else {
+        LOG_WARN("AODV: No route to RREQ originator 0x%x", rreqOriginator);
+        //if route does not exist drop RREP
+        return;
     }
+    
+    
+}
+
+//send RREP to next hop
+void AODVRouter::sendRREP(NodeNum nextHop, const meshtastic_RouteDiscovery *rrep, uint8_t hopCount)
+{
+    LOG_INFO("AODV: Sending RREP to next hop 0x%x", nextHop);
+    meshtastic_Routing replyRouting = meshtastic_Routing_init_zero;
+    replyRouting.which_variant = meshtastic_Routing_route_reply_tag;
+    replyRouting.route_reply = *rrep;
+    sendAODVMessage(&replyRouting, nextHop, hopCount - 1);
 }
 
 /**
@@ -473,9 +534,12 @@ int32_t AODVRouter::runOnce()
     
     // Clean up old RREQ cache entries
     cleanRREQCache();
+
+    // Clean up old RREP cache entries
+    cleanRREPCache();
     
     // Print routing table every 60 seconds (1 minute)
-    if (now - lastRoutingTablePrint > 60000) {
+    if (now - lastRoutingTablePrint > 6000) {
         printRoutingTable();
         lastRoutingTablePrint = now;
     }
@@ -571,6 +635,15 @@ bool AODVRouter::isRREQCached(NodeNum originator, uint32_t rreqId)
 }
 
 /**
+ * check if RREP is in cache
+ */
+bool AODVRouter::isRREPCached(NodeNum originator, uint32_t rrepId)
+{
+    RREPCacheKey key{originator, rrepId};
+    return rrepCache.find(key) != rrepCache.end();
+}
+
+/**
  * Add RREQ to cache
  */
 void AODVRouter::addRREQToCache(NodeNum originator, uint32_t rreqId)
@@ -579,17 +652,43 @@ void AODVRouter::addRREQToCache(NodeNum originator, uint32_t rreqId)
     rreqCache[key] = RREQCacheEntry(originator, rreqId, millis());
 }
 
+/***
+ * Make a RREP cache
+ */
+void AODVRouter::addRREPToCache(NodeNum originator, uint32_t rrepId)
+{
+    RREPCacheKey key{originator, rrepId};
+    rrepCache[key] = RREPCacheEntry(originator, rrepId, millis());
+}
+
 /**
  * Clean old RREQ cache entries
  */
 void AODVRouter::cleanRREQCache()
 {
     uint32_t now = millis();
-    uint32_t timeout = AODV_NET_TRAVERSAL_TIME * 2;
+    uint32_t timeout = AODV_CACHE_CLEANUP_INTERVAL;
     
     for (auto it = rreqCache.begin(); it != rreqCache.end(); ) {
         if (now - it->second.timestamp > timeout) {
             it = rreqCache.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+/**
+ * Clean old RREP cache entries
+ */
+void AODVRouter::cleanRREPCache()
+{
+    uint32_t now = millis();
+    uint32_t timeout = AODV_CACHE_CLEANUP_INTERVAL;
+    
+    for (auto it = rrepCache.begin(); it != rrepCache.end(); ) {
+        if (now - it->second.timestamp > timeout) {
+            it = rrepCache.erase(it);
         } else {
             ++it;
         }
@@ -620,14 +719,14 @@ void AODVRouter::processPendingRREQs()
             }
             
             if (it->second.retryCount < AODV_RREQ_RETRIES) {
-                // Retry with expanded TTL
+                // Retry with expanded TTL but SAME RREQ ID (no new ID allocated)
                 it->second.retryCount++;
                 uint8_t newTtl = it->second.ttl * 2;
                 it->second.ttl = (newTtl < HOP_MAX) ? newTtl : (uint8_t)HOP_MAX;
                 it->second.nextRetryTime = now + AODV_NET_TRAVERSAL_TIME;
                 
-                LOG_INFO("AODV: Retrying RREQ for 0x%x (retry %d, TTL %d)",
-                         it->second.destination, it->second.retryCount, it->second.ttl);
+                LOG_INFO("AODV: Retrying RREQ for 0x%x (retry %d, TTL %d, REUSING RREQ ID=%d)",
+                         it->second.destination, it->second.retryCount, it->second.ttl, it->second.rreqId);
                 
                 sendRREQ(it->second.destination, it->second.ttl);
                 ++it;
@@ -707,7 +806,7 @@ void AODVRouter::sendAODVMessage(const meshtastic_Routing *routing, NodeNum to, 
     //  FIX: Set relay_node to track the path correctly
     // This allows intermediate nodes to know who the previous hop was
     // Critical for AODV reverse route creation
-    p->relay_node = nodeDB->getNodeNum();
+    // p->relay_node = nodeDB->getNodeNum();
     
     // Encode routing message
     p->decoded.payload.size = pb_encode_to_bytes(

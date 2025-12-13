@@ -11,6 +11,7 @@
 #define AODV_RREQ_RETRIES 2               // Number of RREQ retries
 #define AODV_RREQ_RATELIMIT 10000         // 10 seconds between RREQs for same destination
 #define AODV_MAX_REPAIR_TTL 3             // Maximum TTL for local repair
+#define AODV_CACHE_CLEANUP_INTERVAL 300000        // 5 minutes
 
 /**
  * AODV Route Entry
@@ -45,6 +46,20 @@ struct RREQCacheEntry {
 };
 
 /**
+ * AODV RREP (Route Reply) Cache Entry
+ */
+struct RREPCacheEntry {
+    NodeNum originator;           // RREP originator
+    uint32_t rrepId;              // RREP ID
+    uint32_t timestamp;           // When we saw this RREP
+    
+    RREPCacheEntry() : originator(0), rrepId(0), timestamp(0) {}
+    
+    RREPCacheEntry(NodeNum orig, uint32_t id, uint32_t ts) 
+        : originator(orig), rrepId(id), timestamp(ts) {}
+};
+
+/**
  * AODV RREQ ID Cache Key
  */
 struct RREQCacheKey {
@@ -57,11 +72,32 @@ struct RREQCacheKey {
 };
 
 /**
+ * AODV RREP ID Cache Key
+ */
+struct RREPCacheKey {
+    NodeNum originator;
+    uint32_t rrepId;
+    
+    bool operator==(const RREPCacheKey &other) const {
+        return originator == other.originator && rrepId == other.rrepId;
+    }
+};
+
+/**
  * Hash function for RREQ Cache Key
  */
 struct RREQCacheKeyHash {
     size_t operator()(const RREQCacheKey &k) const {
         return std::hash<NodeNum>()(k.originator) ^ std::hash<uint32_t>()(k.rreqId);
+    }
+};
+
+/**
+ * Hash function for RREP Cache Key
+ */
+struct RREPCacheKeyHash {
+    size_t operator()(const RREPCacheKey &k) const {
+        return std::hash<NodeNum>()(k.originator) ^ std::hash<uint32_t>()(k.rrepId);
     }
 };
 
@@ -138,6 +174,8 @@ class AODVRouter : public FloodingRouter
     
     // RREQ cache to prevent processing duplicate RREQs
     std::unordered_map<RREQCacheKey, RREQCacheEntry, RREQCacheKeyHash> rreqCache;
+    // RREP cache to prevent processing duplicate RREPs
+    std::unordered_map<RREPCacheKey, RREPCacheEntry, RREPCacheKeyHash> rrepCache;
     
     // Pending RREQs waiting for RREPs
     std::map<NodeNum, PendingRREQ> pendingRREQs;
@@ -160,6 +198,8 @@ class AODVRouter : public FloodingRouter
     void handleRREQ(const meshtastic_MeshPacket *p, const meshtastic_Routing *routing);
     void handleRREP(const meshtastic_MeshPacket *p, const meshtastic_Routing *routing);
     void handleRERR(const meshtastic_MeshPacket *p, const meshtastic_Routing *routing);
+    //send RREP to next hop
+    void sendRREP(NodeNum nextHop, const meshtastic_RouteDiscovery *rrep, uint8_t hopCount);
     
     // Route Management Methods
     AODVRouteEntry* findRoute(NodeNum destination);
@@ -173,7 +213,10 @@ class AODVRouter : public FloodingRouter
     // Utility Methods
     bool isRREQCached(NodeNum originator, uint32_t rreqId);
     void addRREQToCache(NodeNum originator, uint32_t rreqId);
+    bool isRREPCached(NodeNum originator, uint32_t rrepId);
+    void addRREPToCache(NodeNum originator, uint32_t rrepId);
     void cleanRREQCache();
+    void cleanRREPCache();
     void processPendingRREQs();
     void sendBufferedPacket(NodeNum destination);
     uint32_t getNextRREQId();
