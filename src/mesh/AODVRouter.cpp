@@ -48,7 +48,7 @@ ErrorCode AODVRouter::send(meshtastic_MeshPacket *p)
         * Reason: Broadcasts need to reach everyone, flooding is more reliable
     */
 
-    if (p->to == NODENUM_BROADCAST || p->to == 0) {
+    if (p->to == NODENUM_BROADCAST) {
         LOG_DEBUG("AODV: Broadcast packet, using flooding");
         return FloodingRouter::send(p);
     }
@@ -304,6 +304,8 @@ void AODVRouter::handleRREP(const meshtastic_MeshPacket *p, const meshtastic_Rou
         LOG_WARN("AODV: Invalid RREP format (route_count=%d, expected 4)", rrep->route_count);
         return;
     }
+
+    
     
     uint32_t rreqId = rrep->route[0];
     uint32_t destSeqNum = rrep->route[1];
@@ -385,9 +387,8 @@ void AODVRouter::handleRREP(const meshtastic_MeshPacket *p, const meshtastic_Rou
         
         return;
     }
-    
-    // need to add the part if hop know the originator then forward the RREP towards originator
-    //need to check routing table for originator
+
+
     AODVRouteEntry *originatorRoute = findRoute(rreqOriginator);
     if (originatorRoute) {
         LOG_INFO("AODV: Found route to RREQ originator 0x%x via 0x%x", 
@@ -411,6 +412,11 @@ void AODVRouter::sendRREP(NodeNum nextHop, const meshtastic_RouteDiscovery *rrep
     LOG_INFO("AODV: Sending RREP to next hop 0x%x", nextHop);
     meshtastic_Routing replyRouting = meshtastic_Routing_init_zero;
     replyRouting.which_variant = meshtastic_Routing_route_reply_tag;
+
+    //need to increate the hop count before sending
+    meshtastic_RouteDiscovery *replyRrep = &replyRouting.route_reply;
+    *replyRrep = *rrep;
+    replyRrep->route[2] = replyRrep->route[2] + 1; // Update hop count
     replyRouting.route_reply = *rrep;
     sendAODVMessage(&replyRouting, nextHop, hopCount - 1);
 }
