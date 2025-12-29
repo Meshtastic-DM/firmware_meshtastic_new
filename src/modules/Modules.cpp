@@ -107,6 +107,9 @@
 #include "modules/DropzoneModule.h"
 #endif
 
+// Custom radio config change module
+#include "modules/RadioConfigChangeModule.h"
+
 /**
  * Create module instances here.  If you are adding a new module, you must 'new' it here (or somewhere else)
  */
@@ -134,6 +137,8 @@ void setupModules()
 #if !MESHTASTIC_EXCLUDE_TEXTMESSAGE
     textMessageModule = new TextMessageModule();
 #endif
+    // Initialize radio config change module
+    radioConfigChangeModule = new RadioConfigChangeModule();
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
     traceRouteModule = new TraceRouteModule();
 #endif
