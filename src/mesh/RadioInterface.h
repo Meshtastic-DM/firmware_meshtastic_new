@@ -19,6 +19,18 @@
 #define PACKET_FLAGS_HOP_START_MASK 0xE0
 #define PACKET_FLAGS_HOP_START_SHIFT 5
 
+// AODV: Packet type flags (bits 3-4 of flags byte)
+#define PACKET_FLAGS_TYPE_MASK 0x18      // Bits 3-4
+#define PACKET_FLAGS_TYPE_SHIFT 3
+#define PACKET_TYPE_DATA 0x00            // Normal data packet
+#define PACKET_TYPE_RREQ 0x01            // AODV Route Request
+#define PACKET_TYPE_RREP 0x02            // AODV Route Reply
+#define PACKET_TYPE_RERR 0x03            // AODV Route Error
+
+// Helper macros to get/set packet type in flags
+#define GET_PACKET_TYPE(flags) (((flags) & PACKET_FLAGS_TYPE_MASK) >> PACKET_FLAGS_TYPE_SHIFT)
+#define SET_PACKET_TYPE(flags, type) (((flags) & ~PACKET_FLAGS_TYPE_MASK) | (((type) << PACKET_FLAGS_TYPE_SHIFT) & PACKET_FLAGS_TYPE_MASK))
+
 /**
  * This structure has to exactly match the wire layout when sent over the radio link.  Used to keep compatibility
  * with the old radiohead implementation.
