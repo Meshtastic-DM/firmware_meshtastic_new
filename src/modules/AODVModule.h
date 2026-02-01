@@ -25,12 +25,12 @@ class AODVModule : public ProtobufModule<meshtastic_AODV>, public concurrency::O
     void handleRouteRequest(const meshtastic_MeshPacket &mp, const meshtastic_RouteRequest &rreq);
     bool hasSeenRREQ(uint32_t originator, uint32_t rreqId);
     void markRREQAsSeen(uint32_t originator, uint32_t rreqId);
-    void forwardRREQ(const meshtastic_RouteRequest &rreq, uint8_t hopCount);
+    void forwardRREQ(const meshtastic_MeshPacket &receivedPacket, const meshtastic_RouteRequest &rreq);
     void sendRREP(uint32_t originator, uint32_t destination, uint32_t destSeqNum, uint8_t hopCount);
 
     // RREP Processing
     void handleRouteReply(const meshtastic_MeshPacket &mp, const meshtastic_RouteReply &rrep);
-    void forwardRREP(const meshtastic_RouteReply &rrep, uint32_t originator);
+    void forwardRREP(const meshtastic_MeshPacket &receivedPacket, const meshtastic_RouteReply &rrep, uint32_t originator);
     void deliverBufferedPackets(uint32_t destination);
 
     // RERR Processing
