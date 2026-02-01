@@ -25,6 +25,23 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
     wasSeenRecently(p);                                         // FIXME, move this to a sniffSent method
 
     p->next_hop = getNextHop(p->to, p->relay_node); // set the next hop
+    
+    // Log data packet routing
+    if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
+        p->decoded.portnum != meshtastic_PortNum_AODV_ROUTING_APP &&
+        p->decoded.portnum != meshtastic_PortNum_ROUTING_APP) {
+        
+        if (isFromUs(p)) {
+            if (isBroadcast(p->to)) {
+                LOG_INFO("DATA BCAST: port=%d, id=0x%x, hop_limit=%d", 
+                         p->decoded.portnum, p->id, p->hop_limit);
+            } else if (p->next_hop != NO_NEXT_HOP_PREFERENCE) {
+                LOG_INFO("DATA SEND: port=%d, dest=0x%x, next_hop=0x%x, id=0x%x",
+                         p->decoded.portnum, p->to, p->next_hop, p->id);
+            }
+        }
+    }
+    
     LOG_DEBUG("Setting next hop for packet with dest %x to %x", p->to, p->next_hop);
 
     // Check if packet is decoded and what type of control traffic it is
@@ -148,6 +165,16 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
             return false;
         }
 
+        // Log when forwarding packets
+        if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
+            if (p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP) {
+                // AODV control forwarding logged in AODVModule
+            } else if (p->decoded.portnum != meshtastic_PortNum_ROUTING_APP) {
+                LOG_INFO("DATA FWD: port=%d, from=0x%x, to=0x%x, id=0x%x, hop_limit=%d", 
+                         p->decoded.portnum, p->from, p->to, p->id, p->hop_limit);
+            }
+        }
+
         meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
 
         // We are forwarding now
@@ -215,11 +242,14 @@ uint8_t NextHopRouter::getNextHop(NodeNum to, uint8_t relay_node)
         if (route) {
             // We are careful not to return the relay node as the next hop
             if (route->nextHop != relay_node) {
-                LOG_DEBUG("AODV: Using route to 0x%x via 0x%x, hops=%d", to, route->nextHop, route->hopCount);
+                LOG_INFO("AODV: Route found to 0x%x via next_hop=0x%x, hops=%d, expires in %ds", 
+                         to, route->nextHop, route->hopCount, (route->expiryTime - millis()) / 1000);
                 return route->nextHop;
             } else {
                 LOG_WARN("AODV: Next hop for 0x%x is 0x%x, same as relayer; no preference", to, route->nextHop);
             }
+        } else {
+            LOG_DEBUG("AODV: No route found for 0x%x", to);
         }
     }
     

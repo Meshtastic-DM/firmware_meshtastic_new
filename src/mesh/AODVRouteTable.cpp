@@ -30,7 +30,8 @@ void AODVRouteTable::addRoute(uint32_t destination, uint8_t nextHop, uint8_t hop
 {
     uint32_t expiry = millis() + AODV_ACTIVE_ROUTE_TIMEOUT;
     routes[destination] = AODVRouteEntry(destination, nextHop, hopCount, destSeqNum, expiry);
-    LOG_INFO("AODV: Added route to 0x%x via 0x%x, hops=%d, seq=%u", destination, nextHop, hopCount, destSeqNum);
+    LOG_INFO("AODV ROUTE ADD: dest=0x%x, next_hop=0x%x, hops=%d, seq=%u, expires_in=%ds", 
+             destination, nextHop, hopCount, destSeqNum, AODV_ACTIVE_ROUTE_TIMEOUT / 1000);
 }
 
 void AODVRouteTable::updateRoute(uint32_t destination, uint8_t nextHop, uint8_t hopCount, uint32_t destSeqNum)
@@ -45,10 +46,12 @@ void AODVRouteTable::updateRoute(uint32_t destination, uint8_t nextHop, uint8_t 
             route.destSeqNum = destSeqNum;
             route.isValid = true;
             route.refreshExpiry();
-            LOG_INFO("AODV: Updated route to 0x%x via 0x%x, hops=%d, seq=%u", destination, nextHop, hopCount, destSeqNum);
+            LOG_INFO("AODV ROUTE UPDATE: dest=0x%x, next_hop=0x%x, hops=%d, seq=%u (improved)", 
+                     destination, nextHop, hopCount, destSeqNum);
         } else {
             // Just refresh expiry if route info hasn't improved
             route.refreshExpiry();
+            LOG_DEBUG("AODV ROUTE REFRESH: dest=0x%x, expiry refreshed", destination);
         }
     } else {
         addRoute(destination, nextHop, hopCount, destSeqNum);

@@ -333,8 +333,10 @@ ErrorCode Router::send(meshtastic_MeshPacket *p)
 
     p->relay_node = nodeDB->getLastByteOfNodeNum(getNodeNum()); // set the relayer to us
     // If we are the original transmitter, set the hop limit with which we start
-    if (isFromUs(p))
+    if (isFromUs(p)) {
         p->hop_start = p->hop_limit;
+        // AODV control packet sending is logged in AODVModule with specific type (RREQ/RREP/RERR)
+    }
 
     // If the packet hasn't yet been encrypted, do so now (it might already be encrypted if we are just forwarding it)
 
@@ -699,6 +701,16 @@ void Router::handleReceived(meshtastic_MeshPacket *p, RxSource src)
         cancelSending(p->from, p->id);
         skipHandle = true;
     } else if (decodedState == DecodeState::DECODE_SUCCESS) {
+        // AODV control packets will be logged in AODVModule with specific type (RREQ/RREP/RERR)
+        
+        // Log when data packets reach their destination
+        if (isToUs(p) && p->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
+            p->decoded.portnum != meshtastic_PortNum_AODV_ROUTING_APP &&
+            p->decoded.portnum != meshtastic_PortNum_ROUTING_APP && !isFromUs(p)) {
+            LOG_INFO("DATA AODV RECV: port=%d, from=0x%x, id=0x%x, hops=%d", 
+                     p->decoded.portnum, p->from, p->id, p->hop_start - p->hop_limit);
+        }
+        
         // parsing was successful, queue for our recipient
         if (src == RX_SRC_LOCAL)
             printPacket("handleReceived(LOCAL)", p);

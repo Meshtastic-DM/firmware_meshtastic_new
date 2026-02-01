@@ -69,9 +69,10 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
 
     // Are we the destination?
     if (rreq.destination == nodeDB->getNodeNum()) {
-        LOG_INFO("AODV: We are destination, sending RREP");
+        LOG_INFO("AODV RREQ TARGET: from=0x%x, ID=%u, hops=%d", rreq.originator, rreq.rreq_id, rreq.hop_count);
         // Increment our sequence number (destination always has fresh seq num)
         uint32_t mySeqNum = routeTable.incrementMySeqNum();
+        LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=0", rreq.originator, rreq.destination, mySeqNum);
         sendRREP(rreq.originator, rreq.destination, mySeqNum, 0); // 0 hops to ourselves
         return;
     }
@@ -79,13 +80,17 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
     // Do we have a route to the destination?
     AODVRouteEntry *route = routeTable.findRoute(rreq.destination);
     if (route && route->destSeqNum >= rreq.dest_seq_num) {
-        LOG_INFO("AODV: Have route to dest, sending intermediate RREP");
+        LOG_INFO("AODV RREQ RECV: from=0x%x, dest=0x%x, ID=%u, have_route via 0x%x", 
+                 rreq.originator, rreq.destination, rreq.rreq_id, route->nextHop);
+        LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=%d (intermediate)", 
+                 rreq.originator, rreq.destination, route->destSeqNum, route->hopCount);
         sendRREP(rreq.originator, rreq.destination, route->destSeqNum, route->hopCount);
         return;
     }
 
     // Forward RREQ if we're not the destination and don't have a route
-    LOG_DEBUG("AODV: Forwarding RREQ");
+    LOG_INFO("AODV RREQ RBCAST: orig=0x%x, dest=0x%x, ID=%u, hops=%d->%d", 
+             rreq.originator, rreq.destination, rreq.rreq_id, rreq.hop_count, rreq.hop_count + 1);
     forwardRREQ(rreq, rreq.hop_count + 1);
 }
 
@@ -102,7 +107,8 @@ void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtas
 
     // Are we the originator who requested this route?
     if (rrep.originator == nodeDB->getNodeNum()) {
-        LOG_INFO("AODV: RREP reached originator, route established to 0x%x", rrep.destination);
+        LOG_INFO("AODV RREP RECV: dest=0x%x, seq=%u, hops=%d, route_established via 0x%x", 
+                 rrep.destination, rrep.dest_seq_num, rrep.hop_count + 1, prevHop);
         
         // Remove pending RREQ
         routeTable.removePendingRREQ(rrep.destination);
@@ -113,7 +119,8 @@ void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtas
     }
 
     // Forward RREP toward originator
-    LOG_DEBUG("AODV: Forwarding RREP to originator 0x%x", rrep.originator);
+    LOG_INFO("AODV RREP FWD: to=0x%x, dest=0x%x, seq=%u, hops=%d->%d", 
+             rrep.originator, rrep.destination, rrep.dest_seq_num, rrep.hop_count, rrep.hop_count + 1);
     forwardRREP(rrep, rrep.originator);
 }
 
@@ -196,7 +203,7 @@ void AODVModule::initiateRouteDiscovery(uint32_t destination, meshtastic_MeshPac
         pb_encode_to_bytes(p->decoded.payload.bytes, sizeof(p->decoded.payload.bytes), &meshtastic_AODV_msg, &aodv);
 
     // Send
-    LOG_INFO("AODV: Initiating RREQ for dest 0x%x, ID=%u", destination, rreqId);
+    LOG_INFO("AODV RREQ SEND: dest=0x%x, ID=%u, seq=%u, hop_limit=%d", destination, rreqId, mySeqNum, p->hop_limit);
     router->sendLocal(p);
 
     // Mark as pending and update rate limit
