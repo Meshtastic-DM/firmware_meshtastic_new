@@ -49,6 +49,7 @@
 #include "modules/PowerStressModule.h"
 #endif
 #include "modules/RoutingModule.h"
+#include "modules/AODVModule.h"
 #include "modules/TextMessageModule.h"
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
 #include "modules/TraceRouteModule.h"
@@ -298,6 +299,9 @@ void setupModules()
     if (moduleConfig.has_range_test && moduleConfig.range_test.enabled)
         new RangeTestModule();
 #endif
+    // AODV routing module must be added before RoutingModule
+    aodvModule = new AODVModule();
+    
     // NOTE! This module must be added LAST because it likes to check for replies from other modules and avoid sending extra
     // acks
     routingModule = new RoutingModule();
