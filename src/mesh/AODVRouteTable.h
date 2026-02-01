@@ -116,6 +116,7 @@ class AODVRouteTable
     void bufferPacket(uint32_t destination, meshtastic_MeshPacket *packet);
     std::vector<meshtastic_MeshPacket *> getBufferedPackets(uint32_t destination);
     void clearBufferedPackets(uint32_t destination);
+    void clearBufferedPacketsWithoutFreeing(uint32_t destination); // Transfer ownership without freeing
     void removeExpiredBufferedPackets();
 
     // Utility

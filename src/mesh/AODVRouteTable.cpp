@@ -172,6 +172,16 @@ void AODVRouteTable::clearBufferedPackets(uint32_t destination)
     }
 }
 
+void AODVRouteTable::clearBufferedPacketsWithoutFreeing(uint32_t destination)
+{
+    auto it = packetBuffer.find(destination);
+    if (it != packetBuffer.end()) {
+        LOG_DEBUG("AODV: Transferring ownership of %d buffered packets for 0x%x", it->second.size(), destination);
+        // Just clear the buffer without freeing - caller takes ownership
+        packetBuffer.erase(it);
+    }
+}
+
 void AODVRouteTable::removeExpiredBufferedPackets()
 {
     for (auto it = packetBuffer.begin(); it != packetBuffer.end();) {

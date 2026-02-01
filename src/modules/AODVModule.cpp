@@ -418,13 +418,15 @@ void AODVModule::deliverBufferedPackets(uint32_t destination)
 
     LOG_INFO("AODV: Delivering %d buffered packets to 0x%x", packets.size(), destination);
     
+    // CRITICAL: Clear buffer BEFORE sending to transfer ownership.
+    // After router->send(), router owns and will free the packets.
+    // If we clear after, clearBufferedPackets() will double-free them.
+    routeTable.clearBufferedPacketsWithoutFreeing(destination);
+    
     for (auto packet : packets) {
-        // Re-send packet now that we have a route
+        // Router takes ownership and will eventually free this packet
         router->send(packet);
     }
-
-    // Clear the buffer (packets already sent)
-    routeTable.clearBufferedPackets(destination);
 }
 
 void AODVModule::cleanupSeenRREQs()
