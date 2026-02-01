@@ -106,7 +106,8 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
 }
 
 void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtastic_RouteReply &rrep)
-{
+{   
+
     uint8_t hopStart = mp.hop_start;
     uint8_t hopLimit = mp.hop_limit;
     uint8_t hopCount = hopStart - hopLimit;
@@ -119,6 +120,14 @@ void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtas
         hopLimit,
         hopCount
     );
+
+
+    const uint8_t me = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
+
+    if (mp.next_hop != NO_NEXT_HOP_PREFERENCE && mp.next_hop != me)
+        LOG_DEBUG("AODV: Drop RREP not for me (id=0x%x next_hop=0x%x me=0x%x relay=0x%x from=0x%x to=0x%x)",
+                  mp.id, mp.next_hop, me, mp.relay_node, mp.from, mp.to);
+        return;
 
     // Update forward route to destination
     // Previous hop = who relayed this packet to us
@@ -287,11 +296,19 @@ void AODVModule::forwardRREQ(const meshtastic_MeshPacket &receivedPacket, const 
 {
     meshtastic_MeshPacket *p = packetPool.allocCopy(receivedPacket);
 
-    // set relayer to us
-    p->relay_node = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
-
     // force TTL decrement for AODV control
     if (p->hop_limit == 0) { packetPool.release(p); return; }
+
+    LOG_INFO(
+        "AODV RREQ FWD: id=0x%x orig=0x%x dest=0x%x relay_in=0x%x next_hop=0x%x "
+        "hop_limit=%d",
+        p->id,
+        rreq.originator,
+        rreq.destination,
+        p->relay_node,
+        p->next_hop,
+        p->hop_limit
+    );
 
     router->sendLocal(p);
 }
@@ -327,12 +344,20 @@ void AODVModule::forwardRREP(const meshtastic_MeshPacket &receivedPacket, const 
 {
     meshtastic_MeshPacket *p = packetPool.allocCopy(receivedPacket);
 
-    // set relayer to us
-    p->relay_node = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
-
     // force TTL decrement for AODV control
     if (p->hop_limit == 0) { packetPool.release(p); return; }
     p->hop_limit--;
+
+    LOG_INFO(
+        "AODV RREP FWD: id=0x%x orig=0x%x dest=0x%x relay_in=0x%x next_hop=0x%x "
+        "hop_limit=%d",
+        p->id,
+        rrep.originator,
+        rrep.destination,
+        p->relay_node,
+        p->next_hop,
+        p->hop_limit
+    );
 
     router->sendLocal(p);
 }
