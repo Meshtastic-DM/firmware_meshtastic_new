@@ -371,10 +371,10 @@ void printPacket(const char *prefix, const meshtastic_MeshPacket *p)
         out += DEBUG_PORT.mt_sprintf(" via MQTT");
     if (p->hop_start != 0)
         out += DEBUG_PORT.mt_sprintf(" hopStart=%d", p->hop_start);
-    if (p->next_hop != 0)
-        out += DEBUG_PORT.mt_sprintf(" nextHop=0x%x", p->next_hop);
-    if (p->relay_node != 0)
-        out += DEBUG_PORT.mt_sprintf(" relay=0x%x", p->relay_node);
+    // Always show next_hop for AODV debugging (even when 0/NO_NEXT_HOP_PREFERENCE)
+    out += DEBUG_PORT.mt_sprintf(" nextHop=0x%x", p->next_hop);
+    // Always show relay_node for AODV debugging (even when 0)
+    out += DEBUG_PORT.mt_sprintf(" relay=0x%x", p->relay_node);
     if (p->priority != 0)
         out += DEBUG_PORT.mt_sprintf(" priority=%d", p->priority);
 

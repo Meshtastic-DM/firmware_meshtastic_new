@@ -46,13 +46,15 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
     
 
     LOG_INFO(
-        "AODV: Received RREQ from=0x%x dest=0x%x ID=%u hops=%d hop_start=%d hop_limit=%d",
+        "AODV: Received RREQ from=0x%x dest=0x%x ID=%u hops=%d hop_start=%d hop_limit=%d relay=0x%x next_hop=0x%x",
         rreq.originator,
         rreq.destination,
         rreq.rreq_id,
         hopCount,
         mp.hop_start,
-        mp.hop_limit
+        mp.hop_limit,
+        mp.relay_node,
+        mp.next_hop
     );
 
 
@@ -113,12 +115,14 @@ void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtas
     uint8_t hopCount = hopStart - hopLimit;
 
     LOG_INFO(
-        "AODV: Received RREP dest=0x%x seq=%u hop_start=%u hop_limit=%u hops=%u",
+        "AODV: Received RREP dest=0x%x seq=%u hop_start=%u hop_limit=%u hops=%u relay=0x%x next_hop=0x%x",
         rrep.destination,
         rrep.dest_seq_num,
         hopStart,
         hopLimit,
-        hopCount
+        hopCount,
+        mp.relay_node,
+        mp.next_hop
     );
 
 
