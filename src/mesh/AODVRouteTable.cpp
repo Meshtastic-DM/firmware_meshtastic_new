@@ -72,8 +72,7 @@ void AODVRouteTable::removeExpiredRoutes()
     for (auto it = routes.begin(); it != routes.end();) {
         if (it->second.isExpired()) {
             LOG_DEBUG("AODV: Removing expired route to 0x%x", it->first);
-            it->second.isValid = false;
-            ++it;
+            it = routes.erase(it);   // <- real removal
         } else {
             ++it;
         }
@@ -207,6 +206,23 @@ void AODVRouteTable::removeExpiredBufferedPackets()
     }
 }
 
+void AODVRouteTable::dumpRoutes() const
+{
+    LOG_INFO("AODV: Route table dump (count=%d)", (int)routes.size());
+
+    for (const auto &kv : routes) {
+        const auto &r = kv.second;
+
+        // Avoid negative underflow if expiryTime already passed
+        int32_t expiresInMs = (int32_t)(r.expiryTime - millis());
+        int32_t expiresInS  = expiresInMs > 0 ? (expiresInMs / 1000) : 0;
+
+        LOG_INFO("  dest=0x%x via=0x%x hops=%u seq=%u valid=%d expires_in=%ds",
+                 r.destination, r.nextHop, r.hopCount, r.destSeqNum, r.isValid ? 1 : 0, (int)expiresInS);
+    }
+}
+
+
 void AODVRouteTable::cleanup()
 {
     removeExpiredRoutes();
@@ -221,4 +237,6 @@ void AODVRouteTable::cleanup()
             ++it;
         }
     }
+
+    dumpRoutes();
 }

@@ -121,5 +121,6 @@ class AODVRouteTable
 
     // Utility
     void cleanup(); // Periodic cleanup of expired entries
+    void dumpRoutes() const; // Debug: dump all routes to log
     size_t getRouteCount() const { return routes.size(); }
 };
