@@ -244,6 +244,10 @@ uint8_t NextHopRouter::getNextHop(NodeNum to, uint8_t relay_node)
             if (route->nextHop != relay_node) {
                 LOG_INFO("AODV: Route found to 0x%x via next_hop=0x%x, hops=%d, expires in %ds", 
                          to, route->nextHop, route->hopCount, (route->expiryTime - millis()) / 1000);
+                
+                // Extend route expiry when actively used (keep-alive)
+                aodvModule->getRouteTable()->refreshRouteOnUse(to);
+                
                 return route->nextHop;
             } else {
                 LOG_WARN("AODV: Next hop for 0x%x is 0x%x, same as relayer; no preference", to, route->nextHop);

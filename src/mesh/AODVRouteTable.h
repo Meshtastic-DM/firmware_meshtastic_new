@@ -8,6 +8,7 @@
 
 // AODV Configuration Constants
 #define AODV_ACTIVE_ROUTE_TIMEOUT 300000      // 5 minutes - route lifetime in ms
+#define AODV_ROUTE_KEEPALIVE_TIMEOUT 120000   // 2 minutes - extend route when actively used
 #define AODV_RREQ_RETRIES 3                  // Maximum RREQ retransmissions
 #define AODV_RREQ_RATE_LIMIT 1000            // Minimum 1s between RREQs for same destination
 #define AODV_NET_TRAVERSAL_TIME 10000         // 10s - estimated time to traverse network
@@ -39,8 +40,11 @@ struct AODVRouteEntry {
     // Check if route is still valid
     bool isExpired() const { return millis() > expiryTime; }
 
-    // Extend route lifetime
+    // Extend route lifetime (full timeout - used on route updates)
     void refreshExpiry() { expiryTime = millis() + AODV_ACTIVE_ROUTE_TIMEOUT; }
+    
+    // Extend route lifetime when actively used (keep-alive)
+    void extendRouteLifetime() { expiryTime = millis() + AODV_ROUTE_KEEPALIVE_TIMEOUT; }
 };
 
 /*
@@ -97,6 +101,7 @@ class AODVRouteTable
     void addRoute(uint32_t destination, uint8_t nextHop, uint8_t hopCount, uint32_t destSeqNum);
     void updateRoute(uint32_t destination, uint8_t nextHop, uint8_t hopCount, uint32_t destSeqNum);
     void invalidateRoute(uint32_t destination);
+    void refreshRouteOnUse(uint32_t destination);  // Extend route expiry when actively used
     void removeExpiredRoutes();
     void addPrecursor(uint32_t destination, uint8_t precursorNode);
 

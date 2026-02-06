@@ -66,6 +66,16 @@ void AODVRouteTable::invalidateRoute(uint32_t destination)
     }
 }
 
+void AODVRouteTable::refreshRouteOnUse(uint32_t destination)
+{
+    auto it = routes.find(destination);
+    if (it != routes.end() && it->second.isValid && !it->second.isExpired()) {
+        it->second.extendRouteLifetime();
+        LOG_DEBUG("AODV ROUTE KEEPALIVE: dest=0x%x, extended by %ds", 
+                 destination, AODV_ROUTE_KEEPALIVE_TIMEOUT / 1000);
+    }
+}
+
 void AODVRouteTable::removeExpiredRoutes()
 {
     for (auto it = routes.begin(); it != routes.end();) {
