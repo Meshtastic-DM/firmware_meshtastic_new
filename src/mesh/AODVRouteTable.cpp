@@ -50,8 +50,7 @@ void AODVRouteTable::updateRoute(uint32_t destination, uint8_t nextHop, uint8_t 
                      destination, nextHop, hopCount, destSeqNum);
         } else {
             // Just refresh expiry if route info hasn't improved
-            route.refreshExpiry();
-            LOG_DEBUG("AODV ROUTE REFRESH: dest=0x%x, expiry refreshed", destination);
+            LOG_DEBUG("AODV ROUTE IGNORE: dest=0x%x (no improvement)", destination);
         }
     } else {
         addRoute(destination, nextHop, hopCount, destSeqNum);
