@@ -88,11 +88,11 @@ void AODVRouteTable::removeExpiredRoutes()
     }
 }
 
-void AODVRouteTable::addPrecursor(uint32_t destination, uint8_t precursorNode)
+void AODVRouteTable::addPrecursor(uint32_t destination, uint32_t precursorNode)
 {
     auto it = routes.find(destination);
     if (it != routes.end()) {
-        it->second.precursors.insert(precursorNode);
+        it->second.precursor = precursorNode;
     }
 }
 

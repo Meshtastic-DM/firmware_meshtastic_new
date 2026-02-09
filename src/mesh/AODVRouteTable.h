@@ -25,15 +25,17 @@ struct AODVRouteEntry {
     uint32_t destSeqNum;        // Destination sequence number
     uint32_t expiryTime;        // Timestamp when route expires (millis())
     bool isValid;               // Route validity flag
-    std::set<uint8_t> precursors; // Nodes that use this route (for RERR)
+    uint32_t precursor; // Single node that uses this route (for RERR)
 
     AODVRouteEntry()
-        : destination(0), nextHop(0), hopCount(255), destSeqNum(0), expiryTime(0), isValid(false)
+        : destination(0), nextHop(0), hopCount(255), destSeqNum(0), expiryTime(0), isValid(false),
+          precursor(NODENUM_BROADCAST)
     {
     }
 
     AODVRouteEntry(uint32_t dest, uint8_t next, uint8_t hops, uint32_t seqNum, uint32_t expiry)
-        : destination(dest), nextHop(next), hopCount(hops), destSeqNum(seqNum), expiryTime(expiry), isValid(true)
+        : destination(dest), nextHop(next), hopCount(hops), destSeqNum(seqNum), expiryTime(expiry), isValid(true),
+          precursor(NODENUM_BROADCAST)
     {
     }
 
@@ -103,7 +105,7 @@ class AODVRouteTable
     void invalidateRoute(uint32_t destination);
     void refreshRouteOnUse(uint32_t destination);  // Extend route expiry when actively used
     void removeExpiredRoutes();
-    void addPrecursor(uint32_t destination, uint8_t precursorNode);
+    void addPrecursor(uint32_t destination, uint32_t precursorNode);
 
     // Sequence number management
     uint32_t getMySeqNum() { return mySeqNum; }
