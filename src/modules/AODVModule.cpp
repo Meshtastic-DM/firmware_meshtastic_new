@@ -220,6 +220,17 @@ void AODVModule::handleRouteError(const meshtastic_MeshPacket &mp, const meshtas
         mp.id
     );
 
+    const uint8_t me = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
+
+    if (mp.to != NODENUM_BROADCAST && mp.next_hop != me) {
+        LOG_DEBUG(
+            "AODV: Drop RRER unicast not for me "
+            "(id=0x%x next_hop=0x%x me=0x%x relay=0x%x from=0x%x to=0x%x)",
+            mp.id, mp.next_hop, me, mp.relay_node, mp.from, mp.to
+        );
+        return;
+    }
+
     if (rerr.unreachable_destinations_count == 0) return;
 
     uint32_t target = rerr.unreachable_destinations[0].node_num;
