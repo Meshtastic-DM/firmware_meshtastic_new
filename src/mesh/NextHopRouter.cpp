@@ -86,7 +86,10 @@ bool NextHopRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
 
         if (p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA) {
             rxDupe++;
-            stopRetransmission(p->from, p->id);
+            // For packets from us, keep unicast retransmissions until an explicit routing ACK/NAK is received.
+            if (!isFromUs(p) || isBroadcast(p->to)) {
+                stopRetransmission(p->from, p->id);
+            }
         }
 
         // If it was a fallback to flooding, try to relay again

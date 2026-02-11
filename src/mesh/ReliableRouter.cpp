@@ -44,7 +44,7 @@ ErrorCode ReliableRouter::send(meshtastic_MeshPacket *p)
 bool ReliableRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
 {
     // Note: do not use getFrom() here, because we want to ignore messages sent from phone
-    if (p->from == getNodeNum()) {
+    if (p->from == getNodeNum() && isBroadcast(p->to)) {
         printPacket("Rx someone rebroadcasting for us", p);
 
         // We are seeing someone rebroadcast one of our broadcast attempts.
@@ -146,7 +146,7 @@ void ReliableRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtas
         // We consider an ack to be either a !routing packet with a request ID or a routing packet with !error
         PacketId ackId = ((c && c->error_reason == meshtastic_Routing_Error_NONE) || !c) ? p->decoded.request_id : 0;
 
-        // A nak is a routing packt that has an  error code
+        // A nak is a routing packt that has an error code
         PacketId nakId = (c && c->error_reason != meshtastic_Routing_Error_NONE) ? p->decoded.request_id : 0;
 
         // We intentionally don't check wasSeenRecently, because it is harmless to delete non existent retransmission records
