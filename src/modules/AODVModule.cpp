@@ -3,6 +3,7 @@
 #include "MeshService.h"
 #include "NodeDB.h"
 #include "Router.h"
+#include "SDNModule.h"
 #include "configuration.h"
 
 AODVModule *aodvModule;
@@ -172,6 +173,11 @@ void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtas
         precursor = 0;
     }
     routeTable.addPrecursor(rrep.destination, precursor);
+    
+    // Send route update to SDN controller if available
+    if (sdnModule && sdnModule->isControllerAuthenticated()) {
+        sdnModule->sendRouteUpdate(rrep.destination, prevHop, hopCount + 1, rrep.dest_seq_num);
+    }
 
     AODVRouteEntry *rt = routeTable.findRoute(rrep.destination);
     if (rt) {

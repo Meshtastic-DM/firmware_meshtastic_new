@@ -50,6 +50,7 @@
 #endif
 #include "modules/RoutingModule.h"
 #include "modules/AODVModule.h"
+#include "modules/SDNModule.h"
 #include "modules/TextMessageModule.h"
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
 #include "modules/TraceRouteModule.h"
@@ -301,6 +302,9 @@ void setupModules()
 #endif
     // AODV routing module must be added before RoutingModule
     aodvModule = new AODVModule();
+    
+    // SDN module for centralized route collection (must be after AODV)
+    sdnModule = new SDNModule();
     
     // NOTE! This module must be added LAST because it likes to check for replies from other modules and avoid sending extra
     // acks
