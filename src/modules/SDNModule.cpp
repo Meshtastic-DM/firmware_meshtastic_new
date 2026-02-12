@@ -108,7 +108,7 @@ SDNModule::SDNModule()
 
     // Test-only configuration until SDN config is added to module/local config protobufs.
     static constexpr uint32_t kTestControllerNode = 0x00000010;
-    static constexpr uint32_t kTestAnnouncementIntervalSec = 300;
+    static constexpr uint32_t kTestAnnouncementIntervalSec = 60;
     static constexpr const char *kTestSecret = "meshtastic-sdn-secret";
 
     announcementInterval = kTestAnnouncementIntervalSec;
@@ -251,16 +251,25 @@ void SDNModule::sendAnnouncement()
 
     // Add our public key first (we bind it into HMAC)
 #if !(MESHTASTIC_EXCLUDE_PKI)
-    if (crypto->public_key[0] != 0) {
-        memcpy(ann.public_key.bytes, crypto->public_key, 32);
+    // Get our own public key from NodeDB (canonical source after initialization)
+    meshtastic_NodeInfoLite *ourNode = nodeDB->getMeshNode(nodeDB->getNodeNum());
+    if (ourNode && ourNode->has_user && ourNode->user.public_key.size == 32) {
+        memcpy(ann.public_key.bytes, ourNode->user.public_key.bytes, 32);
         ann.public_key.size = 32;
-    } else {
-        LOG_WARN("SDN: No public key available, announcement will not include key");
-        ann.public_key.size = 0;
+    } 
+    // Fallback: config.security.public_key (source of truth before NodeDB init completes)
+    else if (config.has_security && config.security.public_key.size == 32) {
+        memcpy(ann.public_key.bytes, config.security.public_key.bytes, 32);
+        ann.public_key.size = 32;
+        LOG_DEBUG("SDN: Using public key from config (NodeDB not yet populated)");
+    } 
+    else {
+        LOG_WARN("SDN: No public key available (NodeDB or config). Not sending announcement.");
+        return;
     }
 #else
-    LOG_WARN("SDN: PKI excluded, announcement will not include public key");
-    ann.public_key.size = 0;
+    LOG_WARN("SDN: PKI excluded. Not sending announcement.");
+    return;
 #endif
 
     ann.sequence_num = ++announcementSeqNum;
