@@ -4,7 +4,6 @@
 #include "Router.h"
 #include "RTC.h"
 #include "configuration.h"
-#include "mesh/TypeConversions.h"
 #include <pb_encode.h>
 #include <SHA256.h>
 
@@ -77,12 +76,22 @@ static void hmac_sha256_16(const uint8_t *key, size_t keyLen,
     memcpy(out16, full, 16); // truncate
 }
 
-struct __attribute__((packed)) SDNAnnMacData {
-    uint32_t controller;   // full node id
-    uint32_t seq;
-    uint32_t timestamp;
-    uint8_t  pubkey[32];
-};
+static inline void put_u32_le(uint8_t *dst, uint32_t v)
+{
+    dst[0] = (uint8_t)(v);
+    dst[1] = (uint8_t)(v >> 8);
+    dst[2] = (uint8_t)(v >> 16);
+    dst[3] = (uint8_t)(v >> 24);
+}
+
+static void buildAnnMacMsg(uint32_t controller, uint32_t seq, uint32_t ts,
+                           const uint8_t pubkey[32], uint8_t out[4 + 4 + 4 + 32])
+{
+    put_u32_le(out + 0, controller);
+    put_u32_le(out + 4, seq);
+    put_u32_le(out + 8, ts);
+    memcpy(out + 12, pubkey, 32);
+}
 
 SDNModule::SDNModule()
     : ProtobufModule("sdn", meshtastic_PortNum_SDN_APP, &meshtastic_SDN_msg),
@@ -141,29 +150,26 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
         return;
     }
 
-    // Verify HMAC if secret configured
-    if (hmacSecretLen > 0) {
-        if (ann.hmac_hash.size != 16) {
-            LOG_WARN("SDN: Invalid HMAC size: %d (expected 16)", ann.hmac_hash.size);
-            return;
-        }
+    if (hmacSecretLen == 0) {
+        LOG_WARN("SDN: No secret configured; refusing unauthenticated controller");
+        return;
+    }
 
-        SDNAnnMacData mac;
-        mac.controller = controllerNode;
-        mac.seq = ann.sequence_num;
-        mac.timestamp = ann.timestamp;
-        memcpy(mac.pubkey, ann.public_key.bytes, 32);
+    if (ann.hmac_hash.size != 16) {
+        LOG_WARN("SDN: Invalid HMAC size: %d (expected 16)", ann.hmac_hash.size);
+        return;
+    }
 
-        uint8_t expected[16];
-        hmac_sha256_16(hmacSecret, hmacSecretLen,
-                       (const uint8_t *)&mac, sizeof(mac),
-                       expected);
+    uint8_t macMsg[44];
+    buildAnnMacMsg(controllerNode, ann.sequence_num, ann.timestamp, ann.public_key.bytes, macMsg);
 
-        if (memcmp(expected, ann.hmac_hash.bytes, 16) != 0) {
-            LOG_WARN("SDN: HMAC verification failed for controller 0x%x", controllerNode);
-            sdnAuthenticated = false;
-            return;
-        }
+    uint8_t expected[16];
+    hmac_sha256_16(hmacSecret, hmacSecretLen, macMsg, sizeof(macMsg), expected);
+
+    if (memcmp(expected, ann.hmac_hash.bytes, 16) != 0) {
+        LOG_WARN("SDN: HMAC verification failed for controller 0x%x", controllerNode);
+        sdnAuthenticated = false;
+        return;
     }
 
     // Anti-replay (single-controller assumption)
@@ -171,6 +177,14 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
         LOG_WARN("SDN: Replay/old announcement from 0x%x seq=%u last=%u",
                  controllerNode, ann.sequence_num, g_lastAcceptedControllerSeq);
         return;
+    }
+
+    uint32_t now = getTime();
+    if (now != 0) {
+        if (ann.timestamp > now + 60 || now - ann.timestamp > 600) {
+            LOG_WARN("SDN: Announcement timestamp out of window (ann=%u now=%u)", ann.timestamp, now);
+            return;
+        }
     }
     g_lastAcceptedControllerSeq = ann.sequence_num;
 
@@ -182,31 +196,17 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
     
     // Store controller public key in NodeDB
     meshtastic_NodeInfoLite *node = nodeDB->getMeshNode(controllerNode);
-    if (node && node->has_user) {
-        // Node exists with user info, update only if public key changed
-        if (node->user.public_key.size != 32 || 
-            memcmp(node->user.public_key.bytes, ann.public_key.bytes, 32) != 0) {
-            
-            meshtastic_User tempUser = TypeConversions::ConvertToUser(controllerNode, node->user);
-            memcpy(tempUser.public_key.bytes, ann.public_key.bytes, 32);
-            tempUser.public_key.size = 32;
-            
-            nodeDB->updateUser(controllerNode, tempUser, 0);
-            LOG_INFO("SDN: Updated controller 0x%x public key in NodeDB", controllerNode);
-        } else {
-            LOG_DEBUG("SDN: Controller 0x%x public key already stored", controllerNode);
-        }
+    if (node && node->has_user && node->user.public_key.size == 32 &&
+        memcmp(node->user.public_key.bytes, ann.public_key.bytes, 32) == 0) {
+        LOG_DEBUG("SDN: Controller key already stored");
     } else {
-        // Node doesn't exist or has no user info, create minimal user entry with public key
-        meshtastic_User tempUser = meshtastic_User_init_default;
-        snprintf(tempUser.id, sizeof(tempUser.id), "!%08x", controllerNode);
-        snprintf(tempUser.long_name, sizeof(tempUser.long_name), "SDN-%08x", controllerNode);
-        snprintf(tempUser.short_name, sizeof(tempUser.short_name), "S%02x", controllerNode & 0xFF);
-        memcpy(tempUser.public_key.bytes, ann.public_key.bytes, 32);
-        tempUser.public_key.size = 32;
-        
-        nodeDB->updateUser(controllerNode, tempUser, 0);
-        LOG_INFO("SDN: Created node entry and stored controller 0x%x public key in NodeDB", controllerNode);
+        meshtastic_User u = meshtastic_User_init_default;
+        snprintf(u.long_name, sizeof(u.long_name), "SDN-%08x", controllerNode);
+        snprintf(u.short_name, sizeof(u.short_name), "SDN");
+        memcpy(u.public_key.bytes, ann.public_key.bytes, 32);
+        u.public_key.size = 32;
+        nodeDB->updateUser(controllerNode, u, 0);
+        LOG_INFO("SDN: Stored controller 0x%x public key in NodeDB", controllerNode);
     }
 }
 
@@ -255,27 +255,25 @@ void SDNModule::sendAnnouncement()
     ann.sequence_num = ++announcementSeqNum;
     ann.timestamp = timestamp;
 
-    // HMAC over controller_id + seq + timestamp + pubkey
-    if (hmacSecretLen > 0) {
-        if (ann.public_key.size != 32) {
-            LOG_WARN("SDN: Cannot HMAC announcement without 32-byte public key");
-            return;
-        }
-
-        SDNAnnMacData mac;
-        mac.controller = nodeDB->getNodeNum();
-        mac.seq = ann.sequence_num;
-        mac.timestamp = ann.timestamp;
-        memcpy(mac.pubkey, ann.public_key.bytes, 32);
-
-        uint8_t tag16[16];
-        hmac_sha256_16(hmacSecret, hmacSecretLen,
-                       (const uint8_t *)&mac, sizeof(mac),
-                       tag16);
-
-        memcpy(ann.hmac_hash.bytes, tag16, 16);
-        ann.hmac_hash.size = 16;
+    if (hmacSecretLen == 0) {
+        LOG_WARN("SDN: No secret configured; refusing to send unauthenticated announcement");
+        return;
     }
+
+    // HMAC over LE(controller_id + seq + timestamp + pubkey)
+    if (ann.public_key.size != 32) {
+        LOG_WARN("SDN: Cannot HMAC announcement without 32-byte public key");
+        return;
+    }
+
+    uint8_t macMsg[44];
+    buildAnnMacMsg(nodeDB->getNodeNum(), ann.sequence_num, ann.timestamp, ann.public_key.bytes, macMsg);
+
+    uint8_t tag16[16];
+    hmac_sha256_16(hmacSecret, hmacSecretLen, macMsg, sizeof(macMsg), tag16);
+
+    memcpy(ann.hmac_hash.bytes, tag16, 16);
+    ann.hmac_hash.size = 16;
 
     meshtastic_SDN sdn = meshtastic_SDN_init_default;
     sdn.which_payload_variant = meshtastic_SDN_announcement_tag;
