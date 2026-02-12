@@ -4,6 +4,7 @@
 #include "Router.h"
 #include "RTC.h"
 #include "configuration.h"
+#include "mesh/TypeConversions.h"
 #include <pb_encode.h>
 #include <SHA256.h>
 
@@ -176,8 +177,37 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
     sdnAuthenticated = true;
     sdnControllerNode = controllerNode;
 
+    // Store public key in local member
     memcpy(sdnPublicKey, ann.public_key.bytes, 32);
-    LOG_INFO("SDN: Controller 0x%x authenticated, stored public key", controllerNode);
+    
+    // Store controller public key in NodeDB
+    meshtastic_NodeInfoLite *node = nodeDB->getMeshNode(controllerNode);
+    if (node && node->has_user) {
+        // Node exists with user info, update only if public key changed
+        if (node->user.public_key.size != 32 || 
+            memcmp(node->user.public_key.bytes, ann.public_key.bytes, 32) != 0) {
+            
+            meshtastic_User tempUser = TypeConversions::ConvertToUser(controllerNode, node->user);
+            memcpy(tempUser.public_key.bytes, ann.public_key.bytes, 32);
+            tempUser.public_key.size = 32;
+            
+            nodeDB->updateUser(controllerNode, tempUser, 0);
+            LOG_INFO("SDN: Updated controller 0x%x public key in NodeDB", controllerNode);
+        } else {
+            LOG_DEBUG("SDN: Controller 0x%x public key already stored", controllerNode);
+        }
+    } else {
+        // Node doesn't exist or has no user info, create minimal user entry with public key
+        meshtastic_User tempUser = meshtastic_User_init_default;
+        snprintf(tempUser.id, sizeof(tempUser.id), "!%08x", controllerNode);
+        snprintf(tempUser.long_name, sizeof(tempUser.long_name), "SDN-%08x", controllerNode);
+        snprintf(tempUser.short_name, sizeof(tempUser.short_name), "S%02x", controllerNode & 0xFF);
+        memcpy(tempUser.public_key.bytes, ann.public_key.bytes, 32);
+        tempUser.public_key.size = 32;
+        
+        nodeDB->updateUser(controllerNode, tempUser, 0);
+        LOG_INFO("SDN: Created node entry and stored controller 0x%x public key in NodeDB", controllerNode);
+    }
 }
 
 void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteUpdate &update)

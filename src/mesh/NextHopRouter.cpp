@@ -29,6 +29,7 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
     // Log data packet routing
     if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
         p->decoded.portnum != meshtastic_PortNum_AODV_ROUTING_APP &&
+        p->decoded.portnum != meshtastic_PortNum_SDN_APP &&
         p->decoded.portnum != meshtastic_PortNum_ROUTING_APP) {
         
         if (isFromUs(p)) {
@@ -47,12 +48,13 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
     // Check if packet is decoded and what type of control traffic it is
     bool isDecoded = (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag);
     bool isAodvControl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP);
+    bool isSdnControl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_SDN_APP);
     bool isRoutingCtrl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_ROUTING_APP);
 
     // If no route exists and we're sending from local node, trigger AODV route discovery
-    // But never trigger discovery for AODV control packets or routing protocol packets
+    // But never trigger discovery for AODV control packets, SDN control packets, or routing protocol packets
     if (isFromUs(p) && !isBroadcast(p->to) && p->next_hop == NO_NEXT_HOP_PREFERENCE && aodvModule && isDecoded &&
-        !isAodvControl && !isRoutingCtrl) {
+        !isAodvControl && !isSdnControl && !isRoutingCtrl) {
         LOG_INFO("AODV: No route to 0x%x, initiating route discovery", p->to);
         aodvModule->initiateRouteDiscovery(p->to, packetPool.allocCopy(*p));
         // Original packet will be buffered by AODV module, release this one

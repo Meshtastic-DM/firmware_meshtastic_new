@@ -701,11 +701,12 @@ void Router::handleReceived(meshtastic_MeshPacket *p, RxSource src)
         cancelSending(p->from, p->id);
         skipHandle = true;
     } else if (decodedState == DecodeState::DECODE_SUCCESS) {
-        // AODV control packets will be logged in AODVModule with specific type (RREQ/RREP/RERR)
+        // AODV and SDN control packets will be logged in their respective modules with specific types
         
         // Log when data packets reach their destination
         if (isToUs(p) && p->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
             p->decoded.portnum != meshtastic_PortNum_AODV_ROUTING_APP &&
+            p->decoded.portnum != meshtastic_PortNum_SDN_APP &&
             p->decoded.portnum != meshtastic_PortNum_ROUTING_APP && !isFromUs(p)) {
             LOG_INFO("DATA AODV RECV: port=%d, from=0x%x, id=0x%x, hops=%d", 
                      p->decoded.portnum, p->from, p->id, p->hop_start - p->hop_limit);
@@ -736,9 +737,9 @@ void Router::handleReceived(meshtastic_MeshPacket *p, RxSource src)
         if (shouldIgnoreNonstandardPorts && p->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
             !IS_ONE_OF(p->decoded.portnum, meshtastic_PortNum_TEXT_MESSAGE_APP, meshtastic_PortNum_TEXT_MESSAGE_COMPRESSED_APP,
                        meshtastic_PortNum_POSITION_APP, meshtastic_PortNum_NODEINFO_APP, meshtastic_PortNum_ROUTING_APP,
-                       meshtastic_PortNum_AODV_ROUTING_APP, meshtastic_PortNum_TELEMETRY_APP, meshtastic_PortNum_ADMIN_APP,
-                       meshtastic_PortNum_ALERT_APP, meshtastic_PortNum_KEY_VERIFICATION_APP, meshtastic_PortNum_WAYPOINT_APP,
-                       meshtastic_PortNum_STORE_FORWARD_APP, meshtastic_PortNum_TRACEROUTE_APP)) {
+                       meshtastic_PortNum_AODV_ROUTING_APP, meshtastic_PortNum_SDN_APP, meshtastic_PortNum_TELEMETRY_APP,
+                       meshtastic_PortNum_ADMIN_APP, meshtastic_PortNum_ALERT_APP, meshtastic_PortNum_KEY_VERIFICATION_APP,
+                       meshtastic_PortNum_WAYPOINT_APP, meshtastic_PortNum_STORE_FORWARD_APP, meshtastic_PortNum_TRACEROUTE_APP)) {
             LOG_DEBUG("Ignore packet on non-standard portnum for CORE_PORTNUMS_ONLY");
             cancelSending(p->from, p->id);
             skipHandle = true;
