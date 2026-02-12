@@ -106,17 +106,28 @@ SDNModule::SDNModule()
 {
     isPromiscuous = true; // Receive all SDN messages
 
-    // TODO: Load config (secret, controller mode, interval) from config.sdn.
-    // Example:
-    // const char *secret = "meshtastic-sdn-secret";
-    // hmacSecretLen = strlen(secret);
-    // memcpy(hmacSecret, secret, hmacSecretLen);
+    // Test-only configuration until SDN config is added to module/local config protobufs.
+    static constexpr uint32_t kTestControllerNode = 0x00000010;
+    static constexpr uint32_t kTestAnnouncementIntervalSec = 300;
+    static constexpr const char *kTestSecret = "meshtastic-sdn-secret";
+
+    announcementInterval = kTestAnnouncementIntervalSec;
+
+    size_t secretLen = strlen(kTestSecret);
+    if (secretLen > sizeof(hmacSecret)) {
+        secretLen = sizeof(hmacSecret);
+    }
+    memcpy(hmacSecret, kTestSecret, secretLen);
+    hmacSecretLen = secretLen;
+
+    const uint32_t myNode = nodeDB ? nodeDB->getNodeNum() : 0;
+    isSDNController = (myNode == kTestControllerNode);
 
     if (isSDNController) {
         setIntervalFromNow(announcementInterval * 1000);
-        LOG_INFO("SDN: Initialized as controller, announcement interval=%us", announcementInterval);
+        LOG_INFO("SDN: Test mode controller enabled (node=0x%08x, interval=%us)", myNode, announcementInterval);
     } else {
-        LOG_INFO("SDN: Initialized as regular node");
+        LOG_INFO("SDN: Test mode regular node (node=0x%08x)", myNode);
     }
 }
 
