@@ -105,7 +105,7 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
     // Forward RREQ if we're not the destination and don't have a route
     LOG_INFO("AODV RREQ RBCAST: orig=0x%x, dest=0x%x, ID=%u, hops=%d (will be %d after forward)", 
              rreq.originator, rreq.destination, rreq.rreq_id, hopCount, hopCount + 1);
-    forwardRREQ(mp, rreq);
+    //forwardRREQ(mp, rreq);
 }
 
 void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtastic_RouteReply &rrep)
@@ -210,7 +210,7 @@ void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtas
     // Forward RREP toward originator
     LOG_INFO("AODV RREP FWD: to=0x%x, dest=0x%x, seq=%u, hops=%d (will be %d after forward)", 
              rrep.originator, rrep.destination, rrep.dest_seq_num, hopCount, hopCount + 1);
-    forwardRREP(mp, rrep, rrep.originator);
+    //forwardRREP(mp, rrep, rrep.originator);
 }
 
 void AODVModule::handleRouteError(const meshtastic_MeshPacket &mp, const meshtastic_RouteError &rerr)
@@ -254,6 +254,7 @@ void AODVModule::handleRouteError(const meshtastic_MeshPacket &mp, const meshtas
 
         // Optional: if you want, refresh hop_start when creating "new" forwarding packets,
         // but usually you keep the same and let hop_limit decrease through forwarding.
+
         router->sendLocal(fwd);
     } else {
         LOG_INFO("AODV: RERR reached local target 0x%x, stop", target);
