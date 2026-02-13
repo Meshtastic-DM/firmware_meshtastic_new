@@ -616,9 +616,11 @@ meshtastic_Routing_Error perhapsEncode(meshtastic_MeshPacket *p)
             config.security.private_key.size == 32 && !isBroadcast(p->to) && node != nullptr &&
             // Check for a known public key for the destination
             (node->user.public_key.size == 32) &&
-            // Some portnums either make no sense to send with PKC
+            // Some control portnums should not use PKI because intermediate nodes
+            // and non-keyed peers must still be able to decode/route them.
             p->decoded.portnum != meshtastic_PortNum_TRACEROUTE_APP && p->decoded.portnum != meshtastic_PortNum_NODEINFO_APP &&
-            p->decoded.portnum != meshtastic_PortNum_ROUTING_APP && p->decoded.portnum != meshtastic_PortNum_POSITION_APP) {
+            p->decoded.portnum != meshtastic_PortNum_ROUTING_APP && p->decoded.portnum != meshtastic_PortNum_POSITION_APP &&
+            p->decoded.portnum != meshtastic_PortNum_AODV_ROUTING_APP && p->decoded.portnum != meshtastic_PortNum_SDN_APP) {
             LOG_DEBUG("Use PKI!");
             if (numbytes + MESHTASTIC_HEADER_LENGTH + MESHTASTIC_PKC_OVERHEAD > MAX_LORA_PAYLOAD_LEN)
                 return meshtastic_Routing_Error_TOO_LARGE;
