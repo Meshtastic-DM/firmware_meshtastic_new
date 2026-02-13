@@ -209,6 +209,21 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
     sdnAuthenticated = true;
     sdnControllerNode = controllerNode;
 
+    // Install/update reverse route to authenticated controller (same pattern as AODV RREQ handling)
+    if (aodvModule && aodvModule->getRouteTable()) {
+        uint8_t hopCount = mp.hop_start - mp.hop_limit;
+        uint8_t prevHop = mp.relay_node; // already last-byte
+        if (prevHop == 0) {
+            prevHop = nodeDB->getLastByteOfNodeNum(mp.from); // fallback only
+        }
+
+        aodvModule->getRouteTable()->updateRoute(controllerNode, prevHop, hopCount + 1, ann.sequence_num);
+        LOG_INFO("SDN: Route to controller installed (dest=0x%x via=0x%x hops=%u seq=%u)",
+                 controllerNode, prevHop, hopCount + 1, ann.sequence_num);
+    } else {
+        LOG_WARN("SDN: AODV unavailable, cannot install route to authenticated controller 0x%x", controllerNode);
+    }
+
     // Store public key in local member
     memcpy(sdnPublicKey, ann.public_key.bytes, 32);
     
