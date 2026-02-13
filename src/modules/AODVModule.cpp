@@ -210,7 +210,7 @@ void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtas
     // Forward RREP toward originator
     LOG_INFO("AODV RREP FWD: to=0x%x, dest=0x%x, seq=%u, hops=%d (will be %d after forward)", 
              rrep.originator, rrep.destination, rrep.dest_seq_num, hopCount, hopCount + 1);
-    //forwardRREP(mp, rrep, rrep.originator);
+    forwardRREP(mp, rrep, rrep.originator);
 }
 
 void AODVModule::handleRouteError(const meshtastic_MeshPacket &mp, const meshtastic_RouteError &rerr)
