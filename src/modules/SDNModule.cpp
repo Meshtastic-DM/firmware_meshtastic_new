@@ -1,4 +1,5 @@
 #include "SDNModule.h"
+#include "AODVModule.h"
 #include "MeshService.h"
 #include "NodeDB.h"
 #include "Router.h"
@@ -17,6 +18,7 @@ SDNModule *sdnModule;
  */
 
 static uint32_t g_lastAcceptedControllerSeq = 0;
+static uint32_t g_sdnAnnouncementSeqFallback = 0;
 
 static void sha256_once(const uint8_t *data, size_t len, uint8_t out[32])
 {
@@ -100,7 +102,6 @@ SDNModule::SDNModule()
       announcementInterval(300), // Default 5 minutes
       sdnControllerNode(0),
       sdnAuthenticated(false),
-      announcementSeqNum(0),
       lastAnnouncementTime(0),
       hmacSecretLen(0)
 {
@@ -278,7 +279,12 @@ void SDNModule::sendAnnouncement()
     return;
 #endif
 
-    ann.sequence_num = ++announcementSeqNum;
+    if (aodvModule && aodvModule->getRouteTable()) {
+        ann.sequence_num = aodvModule->getRouteTable()->incrementMySeqNum();
+    } else {
+        ann.sequence_num = ++g_sdnAnnouncementSeqFallback;
+        LOG_WARN("SDN: AODV route table unavailable, using local fallback announcement sequence");
+    }
     ann.timestamp = timestamp;
 
     if (hmacSecretLen == 0) {
@@ -319,7 +325,7 @@ void SDNModule::sendAnnouncement()
         &sdn
     );
 
-    LOG_INFO("SDN: Sending announcement seq=%u, timestamp=%u", announcementSeqNum, timestamp);
+    LOG_INFO("SDN: Sending announcement seq=%u, timestamp=%u", ann.sequence_num, timestamp);
     router->sendLocal(p);
 
     lastAnnouncementTime = millis();

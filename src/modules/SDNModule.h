@@ -27,7 +27,6 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
     bool sdnAuthenticated;             // Has controller been authenticated?
     
     // Announcement state (for controller nodes)
-    uint32_t announcementSeqNum;       // Sequence number for announcements
     uint32_t lastAnnouncementTime;     // Last time we sent announcement (millis())
     
     // HMAC secret for authentication
