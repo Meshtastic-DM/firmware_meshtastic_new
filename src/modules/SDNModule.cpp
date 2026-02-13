@@ -149,7 +149,13 @@ bool SDNModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtast
 }
 
 void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const meshtastic_SDNAnnouncement &ann)
-{
+{   
+    // Ignore our own announcements
+    if (mp.from == nodeDB->getNodeNum()) {
+        LOG_DEBUG("SDN: Ignoring our own announcement (0x%08x)", mp.from);
+        return;
+    }
+    
     const uint32_t controllerNode = mp.from;
 
     LOG_INFO("SDN: Received announcement from 0x%x, seq=%u, timestamp=%u",
