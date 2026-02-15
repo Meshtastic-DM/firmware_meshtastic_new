@@ -97,6 +97,12 @@ bool ReliableRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
  */
 void ReliableRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtastic_Routing *c)
 {
+    // Debug: log incoming packet details early
+    if (p->decoded.portnum == meshtastic_PortNum_ROUTING_APP) {
+        LOG_DEBUG("RX ROUTING pkt: id=0x%x, from=0x%x, to=0x%x, request_id=0x%x, want_ack=%d, c=%p",
+                  p->id, p->from, p->to, p->decoded.request_id, p->want_ack, c);
+    }
+    
     if (isToUs(p)) { // ignore ack/nak/want_ack packets that are not address to us (we only handle 0 hop reliability)
         if (!MeshModule::currentReply) {
             if (p->want_ack) {
@@ -160,6 +166,10 @@ void ReliableRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtas
 
         // A nak is a routing packt that has an error code
         PacketId nakId = (c && c->error_reason != meshtastic_Routing_Error_NONE) ? p->decoded.request_id : 0;
+
+        // Debug: log ACK/NAK detection
+        LOG_DEBUG("ACK detect: c=%p, err=%d, request_id=0x%x, reply_id=0x%x, ackId=0x%x, nakId=0x%x",
+                  c, c ? c->error_reason : -1, p->decoded.request_id, p->decoded.reply_id, ackId, nakId);
 
         // We intentionally don't check wasSeenRecently, because it is harmless to delete non existent retransmission records
         if (ackId || nakId) {
