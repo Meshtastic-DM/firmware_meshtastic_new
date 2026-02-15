@@ -109,6 +109,7 @@ bool NextHopRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
                 if (!findInTxQueue(p->from, p->id)) {
                     reprocessPacket(p);
                     if (!perhapsRebroadcast(p) && isToUs(p) && p->want_ack) {
+                        LOG_INFO("ACK SEND: to=0x%x, for_id=0x%x, hop_limit=0 (repeated packet)", getFrom(p), p->id);
                         sendAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, p->channel, 0);
                     }
                 }
@@ -357,8 +358,8 @@ int32_t NextHopRouter::doRetransmissions()
         if (p.nextTxMsec <= now) {
             if (p.numRetransmissions == 0) {
                 if (isFromUs(p.packet)) {
-                    LOG_DEBUG("Reliable send failed, returning a nak for fr=0x%x,to=0x%x,id=0x%x", p.packet->from, p.packet->to,
-                              p.packet->id);
+                    LOG_INFO("NAK SEND: to=0x%x, for_id=0x%x, err=MAX_RETRANSMIT (reliable send failed fr=0x%x)", 
+                             getFrom(p.packet), p.packet->id, p.packet->from);
                     sendAckNak(meshtastic_Routing_Error_MAX_RETRANSMIT, getFrom(p.packet), p.packet->id, p.packet->channel);
                     
                     // Notify AODV of link failure for route repair

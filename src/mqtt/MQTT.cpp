@@ -87,8 +87,10 @@ inline void onReceiveProto(char *topic, byte *payload, size_t length)
         // Generate an implicit ACK towards ourselves (handled and processed only locally!) for this message.
         // We do this because packets are not rebroadcasted back into MQTT anymore and we assume that at least one node
         // receives it when we get our own packet back. Then we'll stop our retransmissions.
-        if (isFromUs(e.packet))
+        if (isFromUs(e.packet)) {
+            LOG_INFO("ACK IMPLICIT: for_id=0x%x (MQTT loopback)", e.packet->id);
             routingModule->sendAckNak(meshtastic_Routing_Error_NONE, getFrom(e.packet), e.packet->id, ch.index);
+        }
         else
             LOG_INFO("Ignore downlink message we originally sent");
         return;

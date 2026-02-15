@@ -55,6 +55,9 @@ void RoutingModule::sendAckNak(meshtastic_Routing_Error err, NodeNum to, PacketI
     // Allow the caller to set want_ack on this ACK packet if it's important that the ACK be delivered reliably
     p->want_ack = ackWantsAck;
 
+    LOG_DEBUG("TX ACK/NAK: id=0x%x, to=0x%x, for_id=0x%x, err=%d, hop_limit=%d, want_ack=%d, ch=%d",
+              p->id, to, idFrom, err, hopLimit, ackWantsAck, chIndex);
+
     router->sendLocal(p); // we sometimes send directly to the local node
 }
 

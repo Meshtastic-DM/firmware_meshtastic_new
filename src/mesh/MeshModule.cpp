@@ -194,8 +194,10 @@ void MeshModule::callModules(meshtastic_MeshPacket &mp, RxSource src)
             // SECURITY NOTE! I considered sending back a different error code if we didn't find the psk (i.e. !isDecoded)
             // but opted NOT TO.  Because it is not a good idea to let remote nodes 'probe' to find out which PSKs were "good" vs
             // bad.
-            routingModule->sendAckNak(meshtastic_Routing_Error_NO_RESPONSE, getFrom(&mp), mp.id, mp.channel,
-                                      routingModule->getHopLimitForResponse(mp.hop_start, mp.hop_limit));
+            uint8_t nakHopLimit = routingModule->getHopLimitForResponse(mp.hop_start, mp.hop_limit);
+            LOG_INFO("NAK SEND: to=0x%x, for_id=0x%x, err=NO_RESPONSE, hop_limit=%d (no module handled)",
+                     getFrom(&mp), mp.id, nakHopLimit);
+            routingModule->sendAckNak(meshtastic_Routing_Error_NO_RESPONSE, getFrom(&mp), mp.id, mp.channel, nakHopLimit);
         }
     }
 
