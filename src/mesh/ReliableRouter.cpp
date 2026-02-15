@@ -44,7 +44,7 @@ ErrorCode ReliableRouter::send(meshtastic_MeshPacket *p)
 bool ReliableRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
 {
     // Note: do not use getFrom() here, because we want to ignore messages sent from phone
-    if (p->from == getNodeNum() && isBroadcast(p->to)) {
+    if (p->from == getNodeNum() && (isBroadcast(p->to) || !p->want_ack)) {
         printPacket("Rx someone rebroadcasting for us", p);
 
         // We are seeing someone rebroadcast one of our broadcast attempts.
