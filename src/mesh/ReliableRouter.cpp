@@ -153,7 +153,7 @@ void ReliableRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtas
                     sendAckNak(meshtastic_Routing_Error_NO_CHANNEL, getFrom(p), p->id, channels.getPrimaryIndex(),
                                nakHopLimit);
                 }
-            } else if (p->want_ack && p->next_hop == nodeDB->getLastByteOfNodeNum(getNodeNum()) && p->hop_limit > 0) {
+            } else if ((p->want_ack || isToUs(p)) && p->next_hop == nodeDB->getLastByteOfNodeNum(getNodeNum()) && p->hop_limit > 0) {
                 // No wantAck, but we need to ACK with hop limit of 0 if we were the next hop to stop their retransmissions
                 LOG_INFO("ACK SEND: to=0x%x, for_id=0x%x, hop_limit=0 (next-hop, want_ack=0)", getFrom(p), p->id);
                 sendAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, p->channel, 0);
