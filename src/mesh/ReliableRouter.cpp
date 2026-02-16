@@ -124,6 +124,13 @@ void ReliableRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtas
                         LOG_INFO("ACK SEND: to=0x%x, for_id=0x%x, want_ack=0, hop_limit=%d (standard ACK)",
                                  getFrom(p), p->id, ackHopLimit);
                         sendAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, p->channel, ackHopLimit);
+                    } else if (p->decoded.request_id || p->decoded.reply_id) {
+                        // ACK/NAK packets have request_id set and need ACK-of-ACK responses to stop retransmissions
+                        // For ROUTING_APP packets (ACK/NAK), calculate appropriate hop limit
+                        uint8_t ackHopLimit = routingModule->getHopLimitForResponse(p->hop_start, p->hop_limit);
+                        LOG_INFO("ACK SEND: to=0x%x, for_id=0x%x, hop_limit=%d (ACK-of-ACK for ROUTING_APP)",
+                                 getFrom(p), p->id, ackHopLimit);
+                        sendAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, p->channel, ackHopLimit);
                     } else if ((p->hop_start > 0 && p->hop_start == p->hop_limit) || p->next_hop != NO_NEXT_HOP_PREFERENCE) {
                         // If we received the packet directly from the original sender, send a 0-hop ACK since the original sender
                         // won't overhear any implicit ACKs. If we received the packet via NextHopRouter, also send a 0-hop ACK to
