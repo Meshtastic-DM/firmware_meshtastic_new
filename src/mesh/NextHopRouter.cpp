@@ -131,6 +131,8 @@ void NextHopRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtast
         // ACK-based route learning has been REMOVED - AODV manages routes dynamically
         // Just handle ACK cancellation for rebroadcast and stop retransmissions
         if (!isToUs(p)) {
+            LOG_DEBUG("ACK/Reply overhear: from=0x%x, to=0x%x, request_id=0x%x, canceling rebroadcast",
+                      p->from, p->to, p->decoded.request_id);
             Router::cancelSending(p->to, p->decoded.request_id); // cancel rebroadcast for this DM
             // stop retransmission for the original packet
             stopRetransmission(p->to, p->decoded.request_id); // for original packet, from = to and id = request_id
@@ -304,6 +306,8 @@ bool NextHopRouter::stopRetransmission(GlobalPacketId key)
             // We only cancel it if we are the original sender or if we're not a router(_late)
             if (isFromUs(p) || roleAllowsCancelingFromTxQueue(p)) {
                 // remove the 'original' (identified by originator and packet->id) from the txqueue and free it
+                LOG_DEBUG("stopRetransmission: canceling txQueue for from=0x%x, id=0x%x, to=0x%x, retries_left=%d",
+                          getFrom(p), p->id, p->to, old->numRetransmissions);
                 cancelSending(getFrom(p), p->id);
             }
         }

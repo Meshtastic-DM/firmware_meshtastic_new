@@ -118,8 +118,11 @@ void FloodingRouter::perhapsCancelDupe(const meshtastic_MeshPacket *p)
     if (p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA && roleAllowsCancelingDupe(p)) {
         // cancel rebroadcast of this message *if* there was already one, unless we're a router!
         // But only LoRa packets should be able to trigger this.
-        if (Router::cancelSending(p->from, p->id))
+        if (Router::cancelSending(p->from, p->id)) {
+            LOG_DEBUG("Implicit ACK: heard rebroadcast from=0x%x, id=0x%x, to=0x%x, canceled our relay",
+                      p->from, p->id, p->to);
             txRelayCanceled++;
+        }
     }
     if (config.device.role == meshtastic_Config_DeviceConfig_Role_ROUTER_LATE && iface) {
         iface->clampToLateRebroadcastWindow(getFrom(p), p->id);
@@ -138,7 +141,8 @@ void FloodingRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtas
                         (p->decoded.request_id != 0 || p->decoded.reply_id != 0);
     if (isAckorReply && !isToUs(p) && !isBroadcast(p->to)) {
         // do not flood direct message that is ACKed or replied to
-        LOG_DEBUG("Rxd an ACK/reply not for me, cancel rebroadcast");
+        LOG_DEBUG("ACK/Reply overhear: from=0x%x, to=0x%x, request_id=0x%x, canceling DM rebroadcast",
+                  p->from, p->to, p->decoded.request_id);
         Router::cancelSending(p->to, p->decoded.request_id); // cancel rebroadcast for this DM
     }
 
