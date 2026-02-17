@@ -13,6 +13,7 @@
 #define AODV_RREQ_RATE_LIMIT 1000            // Minimum 1s between RREQs for same destination
 #define AODV_NET_TRAVERSAL_TIME 10000         // 10s - estimated time to traverse network
 #define AODV_MAX_PENDING_PACKETS_PER_DEST 5  // Buffer limit per destination
+#define AODV_MAX_RREQ_PER_ORIGINATOR 3        // Maximum RREQs to process per originator at destination
 #define AODV_ROUTE_CLEANUP_INTERVAL 60000     // 60s - periodic route table cleanup
 
 /*

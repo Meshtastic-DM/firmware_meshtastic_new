@@ -16,9 +16,10 @@ class AODVModule : public ProtobufModule<meshtastic_AODV>, public concurrency::O
   private:
     AODVRouteTable routeTable;
     
-    // Track seen RREQs at target node to prevent processing duplicates from same path
-    // Key: (originator, rreq_id, relay_node) -> timestamp
-    std::map<std::tuple<uint32_t, uint32_t, uint8_t>, uint32_t> seenRREQs;
+    // Track seen RREQs at target node to prevent processing duplicates and enforce per-originator limit
+    // Key: originator node number
+    // Value: vector of (rreq_id, relay_node, timestamp) tuples - max 3 per originator
+    std::map<uint32_t, std::vector<std::tuple<uint32_t, uint8_t, uint32_t>>> seenRREQs;
     
     // Cleanup interval for route table maintenance
     uint32_t lastCleanupTime;

@@ -403,14 +403,36 @@ void AODVModule::handleLinkFailure(uint32_t destination)
 
 bool AODVModule::hasSeenRREQ(uint32_t originator, uint32_t rreqId, uint8_t relayNode)
 {
-    auto key = std::make_tuple(originator, rreqId, relayNode);
-    return seenRREQs.find(key) != seenRREQs.end();
+    auto it = seenRREQs.find(originator);
+    if (it == seenRREQs.end()) {
+        return false; // Never seen this originator
+    }
+    
+    const auto& rreqList = it->second;
+    
+    // Check if we've reached the limit for this originator
+    if (rreqList.size() >= AODV_MAX_RREQ_PER_ORIGINATOR) {
+        return true; // Limit reached, reject any further RREQs
+    }
+    
+    // Check for exact match of (rreqId, relayNode)
+    for (const auto& entry : rreqList) {
+        if (std::get<0>(entry) == rreqId && std::get<1>(entry) == relayNode) {
+            return true; // Already seen this exact RREQ from this relay
+        }
+    }
+    
+    return false;
 }
 
 void AODVModule::markRREQAsSeen(uint32_t originator, uint32_t rreqId, uint8_t relayNode)
 {
-    auto key = std::make_tuple(originator, rreqId, relayNode);
-    seenRREQs[key] = millis();
+    auto& rreqList = seenRREQs[originator];
+    
+    // Only add if we haven't reached the limit
+    if (rreqList.size() < AODV_MAX_RREQ_PER_ORIGINATOR) {
+        rreqList.push_back(std::make_tuple(rreqId, relayNode, millis()));
+    }
 }
 
 void AODVModule::forwardRREQ(const meshtastic_MeshPacket &receivedPacket, const meshtastic_RouteRequest &rreq)
@@ -512,8 +534,19 @@ void AODVModule::cleanupSeenRREQs()
 {
     uint32_t now = millis();
     for (auto it = seenRREQs.begin(); it != seenRREQs.end();) {
+        auto& rreqList = it->second;
+        
         // Remove RREQs older than NET_TRAVERSAL_TIME * 2
-        if (now - it->second > AODV_NET_TRAVERSAL_TIME * 2) {
+        rreqList.erase(
+            std::remove_if(rreqList.begin(), rreqList.end(),
+                [now](const std::tuple<uint32_t, uint8_t, uint32_t>& entry) {
+                    return now - std::get<2>(entry) > AODV_NET_TRAVERSAL_TIME * 2;
+                }),
+            rreqList.end()
+        );
+        
+        // Remove originator entry if all RREQs expired
+        if (rreqList.empty()) {
             it = seenRREQs.erase(it);
         } else {
             ++it;
