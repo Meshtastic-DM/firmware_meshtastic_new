@@ -65,15 +65,6 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
         return;
     }
 
-    // Check if we've already seen this RREQ
-    if (hasSeenRREQ(rreq.originator, rreq.rreq_id)) {
-        LOG_DEBUG("AODV: Duplicate RREQ, ignoring");
-        return;
-    }
-
-    // Mark as seen
-    markRREQAsSeen(rreq.originator, rreq.rreq_id);
-
     // Update reverse route to originator (for RREP to travel back)
     // Previous hop = who relayed this packet to us
     uint8_t prevHop = mp.relay_node;                 // already last-byte
@@ -83,6 +74,15 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
 
     // Are we the destination?
     if (rreq.destination == nodeDB->getNodeNum()) {
+        // Check if we've already seen this RREQ from this relay path
+        if (hasSeenRREQ(rreq.originator, rreq.rreq_id, prevHop)) {
+            LOG_DEBUG("AODV: Duplicate RREQ from same path, ignoring");
+            return;
+        }
+        
+        // Mark as seen from this relay path
+        markRREQAsSeen(rreq.originator, rreq.rreq_id, prevHop);
+        
         LOG_INFO("AODV RREQ TARGET: from=0x%x, ID=%u, hops=%d", rreq.originator, rreq.rreq_id, hopCount);
         // Increment our sequence number (destination always has fresh seq num)
         uint32_t mySeqNum = routeTable.incrementMySeqNum();
@@ -401,15 +401,15 @@ void AODVModule::handleLinkFailure(uint32_t destination)
     routeTable.invalidateRoute(destination);
 }
 
-bool AODVModule::hasSeenRREQ(uint32_t originator, uint32_t rreqId)
+bool AODVModule::hasSeenRREQ(uint32_t originator, uint32_t rreqId, uint8_t relayNode)
 {
-    auto key = std::make_pair(originator, rreqId);
+    auto key = std::make_tuple(originator, rreqId, relayNode);
     return seenRREQs.find(key) != seenRREQs.end();
 }
 
-void AODVModule::markRREQAsSeen(uint32_t originator, uint32_t rreqId)
+void AODVModule::markRREQAsSeen(uint32_t originator, uint32_t rreqId, uint8_t relayNode)
 {
-    auto key = std::make_pair(originator, rreqId);
+    auto key = std::make_tuple(originator, rreqId, relayNode);
     seenRREQs[key] = millis();
 }
 
