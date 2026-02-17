@@ -88,6 +88,9 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
         uint32_t mySeqNum = routeTable.incrementMySeqNum();
         LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=0", rreq.originator, rreq.destination, mySeqNum);
         sendRREP(rreq.originator, rreq.destination, mySeqNum, 0); // 0 hops to ourselves
+        // Cancel rebroadcast of RREQ since we are the target
+        router->cancelSending(mp.from, mp.id);
+        LOG_DEBUG("AODV: Target canceled RREQ rebroadcast id=0x%x", mp.id);
         return;
     }
 
