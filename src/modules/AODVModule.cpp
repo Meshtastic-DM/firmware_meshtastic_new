@@ -86,8 +86,8 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
         LOG_INFO("AODV RREQ TARGET: from=0x%x, ID=%u, hops=%d", rreq.originator, rreq.rreq_id, hopCount);
         // Increment our sequence number (destination always has fresh seq num)
         uint32_t mySeqNum = routeTable.incrementMySeqNum();
-        LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=0", rreq.originator, rreq.destination, mySeqNum);
-        sendRREP(rreq.originator, rreq.destination, mySeqNum, 0); // 0 hops to ourselves
+        LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=0, next_hop=0x%x", rreq.originator, rreq.destination, mySeqNum, prevHop);
+        sendRREP(rreq.originator, rreq.destination, mySeqNum, 0, prevHop); // 0 hops to ourselves, next_hop is who sent us the RREQ
         // Cancel rebroadcast of RREQ since we are the target
         router->cancelSending(mp.from, mp.id);
         LOG_DEBUG("AODV: Target canceled RREQ rebroadcast id=0x%x", mp.id);
@@ -99,9 +99,9 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
     if (route && route->destSeqNum >= rreq.dest_seq_num) {
         LOG_INFO("AODV RREQ RECV: from=0x%x, dest=0x%x, ID=%u, have_route via 0x%x", 
                  rreq.originator, rreq.destination, rreq.rreq_id, route->nextHop);
-        LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=%d (intermediate)", 
-                 rreq.originator, rreq.destination, route->destSeqNum, route->hopCount);
-        sendRREP(rreq.originator, rreq.destination, route->destSeqNum, route->hopCount);
+        LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=%d, next_hop=0x%x (intermediate)", 
+                 rreq.originator, rreq.destination, route->destSeqNum, route->hopCount, prevHop);
+        sendRREP(rreq.originator, rreq.destination, route->destSeqNum, route->hopCount, prevHop);
         return;
     }
 
@@ -426,7 +426,7 @@ void AODVModule::forwardRREQ(const meshtastic_MeshPacket &receivedPacket, const 
     router->sendLocal(p);
 }
 
-void AODVModule::sendRREP(uint32_t originator, uint32_t destination, uint32_t destSeqNum, uint8_t hopCount)
+void AODVModule::sendRREP(uint32_t originator, uint32_t destination, uint32_t destSeqNum, uint8_t hopCount, uint8_t nextHop)
 {
     meshtastic_RouteReply rrep = meshtastic_RouteReply_init_default;
     rrep.originator = originator;
@@ -446,10 +446,11 @@ void AODVModule::sendRREP(uint32_t originator, uint32_t destination, uint32_t de
     p->channel = channels.getPrimaryIndex(); // Use primary channel for AODV routing control packets
     p->want_ack = false;
     p->hop_limit = Default::getConfiguredOrDefaultHopLimit(config.lora.hop_limit);
+    p->next_hop = nextHop; // Set next hop to relay node from RREQ
     p->decoded.payload.size =
         pb_encode_to_bytes(p->decoded.payload.bytes, sizeof(p->decoded.payload.bytes), &meshtastic_AODV_msg, &aodv);
 
-    LOG_INFO("AODV: Sending RREP to 0x%x for dest 0x%x", originator, destination);
+    LOG_INFO("AODV: Sending RREP to 0x%x for dest 0x%x, next_hop=0x%x", originator, destination, nextHop);
     router->sendLocal(p);
 }
 
