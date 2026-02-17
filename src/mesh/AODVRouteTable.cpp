@@ -9,16 +9,48 @@ AODVRouteTable::AODVRouteTable() : mySeqNum(1), nextRREQId(1) {}
 AODVRouteEntry *AODVRouteTable::findRoute(uint32_t destination)
 {
     auto it = routes.find(destination);
-    if (it != routes.end()) {
-        auto &route = it->second;
-        if (route.isValid && !route.isExpired()) {
-            return &route;
-        } else if (route.isExpired()) {
-            // Mark as invalid if expired
-            route.isValid = false;
+    if (it != routes.end() && !it->second.empty()) {
+        // Clean up expired routes first
+        auto &routeList = it->second;
+        routeList.erase(std::remove_if(routeList.begin(), routeList.end(),
+                                      [](AODVRouteEntry &r) {
+                                          if (r.isExpired()) {
+                                              r.isValid = false;
+                                              return true;
+                                          }
+                                          return false;
+                                      }),
+                       routeList.end());
+        
+        // Update pathId after cleanup
+        for (size_t i = 0; i < routeList.size(); i++) {
+            routeList[i].pathId = i;
+        }
+        
+        // Return primary route (first valid route)
+        if (!routeList.empty() && routeList[0].isValid && !routeList[0].isExpired()) {
+            return &routeList[0];
         }
     }
     return nullptr;
+}
+
+std::vector<AODVRouteEntry> *AODVRouteTable::getAllRoutes(uint32_t destination)
+{
+    auto it = routes.find(destination);
+    if (it != routes.end() && !it->second.empty()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+size_t AODVRouteTable::getRoutePathCount(uint32_t destination) const
+{
+    auto it = routes.find(destination);
+    if (it != routes.end()) {
+        return it->second.size();
+    }
+    return 0;
 }
 
 bool AODVRouteTable::hasValidRoute(uint32_t destination)
@@ -29,30 +61,59 @@ bool AODVRouteTable::hasValidRoute(uint32_t destination)
 void AODVRouteTable::addRoute(uint32_t destination, uint8_t nextHop, uint8_t hopCount, uint32_t destSeqNum)
 {
     uint32_t expiry = millis() + AODV_ACTIVE_ROUTE_TIMEOUT;
-    routes[destination] = AODVRouteEntry(destination, nextHop, hopCount, destSeqNum, expiry);
-    LOG_INFO("AODV ROUTE ADD: dest=0x%x, next_hop=0x%x, hops=%d, seq=%u, expires_in=%ds", 
-             destination, nextHop, hopCount, destSeqNum, AODV_ACTIVE_ROUTE_TIMEOUT / 1000);
+    std::vector<AODVRouteEntry> routeList;
+    routeList.emplace_back(destination, nextHop, hopCount, destSeqNum, expiry, 0);
+    routes[destination] = routeList;
+    LOG_INFO("AODV ROUTE ADD: dest=0x%x, next_hop=0x%x, hops=%d, seq=%u, pathId=0 (first path)", 
+             destination, nextHop, hopCount, destSeqNum);
 }
 
 void AODVRouteTable::updateRoute(uint32_t destination, uint8_t nextHop, uint8_t hopCount, uint32_t destSeqNum)
 {
     auto it = routes.find(destination);
+    
     if (it != routes.end()) {
-        auto &route = it->second;
-        // Only update if new sequence number is higher, or same seq but lower hop count
-        if (destSeqNum > route.destSeqNum || (destSeqNum == route.destSeqNum && hopCount < route.hopCount)) {
-            route.nextHop = nextHop;
-            route.hopCount = hopCount;
-            route.destSeqNum = destSeqNum;
-            route.isValid = true;
-            route.refreshExpiry();
-            LOG_INFO("AODV ROUTE UPDATE: dest=0x%x, next_hop=0x%x, hops=%d, seq=%u (improved)", 
-                     destination, nextHop, hopCount, destSeqNum);
+        auto &routeList = it->second;
+        
+        // Check if this is a new sequence number (fresher route)
+        if (!routeList.empty() && destSeqNum > routeList[0].destSeqNum) {
+            // Clear old routes - new seq invalidates all old routes
+            LOG_INFO("AODV: New seq %u > old %u, clearing old routes to 0x%x", 
+                     destSeqNum, routeList[0].destSeqNum, destination);
+            routeList.clear();
+        }
+        
+        // Check if we already have a route via this nextHop
+        auto existingRoute = std::find_if(routeList.begin(), routeList.end(),
+                                         [nextHop](const AODVRouteEntry &r) {
+                                             return r.nextHop == nextHop;
+                                         });
+        
+        if (existingRoute != routeList.end()) {
+            // Update existing path (refresh expiry and update metrics if improved)
+            if (destSeqNum >= existingRoute->destSeqNum && hopCount <= existingRoute->hopCount) {
+                existingRoute->hopCount = hopCount;
+                existingRoute->destSeqNum = destSeqNum;
+                existingRoute->isValid = true;
+                existingRoute->refreshExpiry();
+                LOG_INFO("AODV ROUTE UPDATE: dest=0x%x, next_hop=0x%x, hops=%d, seq=%u, pathId=%d (refreshed)", 
+                         destination, nextHop, hopCount, destSeqNum, existingRoute->pathId);
+            }
+        } else if (routeList.size() < AODV_MAX_RREQ_PER_ORIGINATOR) {
+            // Add new path (up to 3 total) - first come first serve, no sorting
+            // pathId assigned based on arrival order: first=0 (primary), second=1, third=2
+            uint8_t newPathId = routeList.size();
+            uint32_t expiry = millis() + AODV_ACTIVE_ROUTE_TIMEOUT;
+            routeList.emplace_back(destination, nextHop, hopCount, destSeqNum, expiry, newPathId);
+            
+            LOG_INFO("AODV ROUTE ADD: dest=0x%x, next_hop=0x%x, hops=%d, seq=%u, pathId=%d (total paths=%d)", 
+                     destination, nextHop, hopCount, destSeqNum, newPathId, (int)routeList.size());
         } else {
-            // Just refresh expiry if route info hasn't improved
-            LOG_DEBUG("AODV ROUTE IGNORE: dest=0x%x (no improvement)", destination);
+            // Already have 3 paths - ignore new route (first-come-first-serve)
+            LOG_DEBUG("AODV ROUTE IGNORE: dest=0x%x, next_hop=0x%x (already have 3 paths)", destination, nextHop);
         }
     } else {
+        // No existing routes - add first one
         addRoute(destination, nextHop, hopCount, destSeqNum);
     }
 }
@@ -61,16 +122,42 @@ void AODVRouteTable::invalidateRoute(uint32_t destination)
 {
     auto it = routes.find(destination);
     if (it != routes.end()) {
-        it->second.isValid = false;
-        LOG_INFO("AODV: Invalidated route to 0x%x", destination);
+        LOG_INFO("AODV: Invalidated all %d routes to 0x%x", (int)it->second.size(), destination);
+        routes.erase(it);
+    }
+}
+
+void AODVRouteTable::invalidateRoutePath(uint32_t destination, uint8_t nextHop)
+{
+    auto it = routes.find(destination);
+    if (it != routes.end()) {
+        auto &routeList = it->second;
+        auto route = std::find_if(routeList.begin(), routeList.end(),
+                                  [nextHop](const AODVRouteEntry &r) {
+                                      return r.nextHop == nextHop;
+                                  });
+        
+        if (route != routeList.end()) {
+            LOG_INFO("AODV: Invalidated path to 0x%x via 0x%x (pathId=%d)", destination, nextHop, route->pathId);
+            routeList.erase(route);
+            
+            // Update pathId for remaining routes
+            for (size_t i = 0; i < routeList.size(); i++) {
+                routeList[i].pathId = i;
+            }
+            
+            if (routeList.empty()) {
+                routes.erase(it);
+            }
+        }
     }
 }
 
 void AODVRouteTable::refreshRouteOnUse(uint32_t destination)
 {
-    auto it = routes.find(destination);
-    if (it != routes.end() && it->second.isValid && !it->second.isExpired()) {
-        it->second.extendRouteLifetime();
+    auto route = findRoute(destination);  // Gets primary route
+    if (route) {
+        route->extendRouteLifetime();
         LOG_DEBUG("AODV ROUTE KEEPALIVE: dest=0x%x, extended by %ds", 
                  destination, AODV_ROUTE_KEEPALIVE_TIMEOUT / 1000);
     }
@@ -79,9 +166,24 @@ void AODVRouteTable::refreshRouteOnUse(uint32_t destination)
 void AODVRouteTable::removeExpiredRoutes()
 {
     for (auto it = routes.begin(); it != routes.end();) {
-        if (it->second.isExpired()) {
-            LOG_DEBUG("AODV: Removing expired route to 0x%x", it->first);
-            it = routes.erase(it);   // <- real removal
+        auto &routeList = it->second;
+        
+        // Remove expired routes from the list
+        routeList.erase(std::remove_if(routeList.begin(), routeList.end(),
+                                      [](const AODVRouteEntry &r) {
+                                          return r.isExpired();
+                                      }),
+                       routeList.end());
+        
+        // Update pathId
+        for (size_t i = 0; i < routeList.size(); i++) {
+            routeList[i].pathId = i;
+        }
+        
+        // Remove destination if no valid routes remain
+        if (routeList.empty()) {
+            LOG_DEBUG("AODV: Removing expired routes to 0x%x", it->first);
+            it = routes.erase(it);
         } else {
             ++it;
         }
@@ -90,9 +192,9 @@ void AODVRouteTable::removeExpiredRoutes()
 
 void AODVRouteTable::addPrecursor(uint32_t destination, uint32_t precursorNode)
 {
-    auto it = routes.find(destination);
-    if (it != routes.end()) {
-        it->second.precursor = precursorNode;
+    auto route = findRoute(destination);  // Gets primary route
+    if (route) {
+        route->precursor = precursorNode;
     }
 }
 
@@ -217,17 +319,23 @@ void AODVRouteTable::removeExpiredBufferedPackets()
 
 void AODVRouteTable::dumpRoutes() const
 {
-    LOG_INFO("AODV: Route table dump (count=%d)", (int)routes.size());
+    int totalRoutes = 0;
+    for (const auto &kv : routes) {
+        totalRoutes += kv.second.size();
+    }
+    
+    LOG_INFO("AODV: Route table dump (%d destinations, %d total paths)", (int)routes.size(), totalRoutes);
 
     for (const auto &kv : routes) {
-        const auto &r = kv.second;
+        for (const auto &r : kv.second) {
+            // Avoid negative underflow if expiryTime already passed
+            int32_t expiresInMs = (int32_t)(r.expiryTime - millis());
+            int32_t expiresInS  = expiresInMs > 0 ? (expiresInMs / 1000) : 0;
 
-        // Avoid negative underflow if expiryTime already passed
-        int32_t expiresInMs = (int32_t)(r.expiryTime - millis());
-        int32_t expiresInS  = expiresInMs > 0 ? (expiresInMs / 1000) : 0;
-
-        LOG_INFO("  dest=0x%x via=0x%x hops=%u seq=%u valid=%d expires_in=%ds",
-                 r.destination, r.nextHop, r.hopCount, r.destSeqNum, r.isValid ? 1 : 0, (int)expiresInS);
+            LOG_INFO("  dest=0x%x via=0x%x hops=%u seq=%u pathId=%u valid=%d expires_in=%ds",
+                     r.destination, r.nextHop, r.hopCount, r.destSeqNum, r.pathId, 
+                     r.isValid ? 1 : 0, (int)expiresInS);
+        }
     }
 }
 
