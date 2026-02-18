@@ -245,27 +245,16 @@ void AODVModule::handleRouteError(const meshtastic_MeshPacket &mp, const meshtas
     uint32_t target = rerr.unreachable_destinations[0].node_num;
     uint32_t seq = rerr.unreachable_destinations[0].seq_num;
 
-    LOG_INFO("AODV: RERR target=0x%x seq=%u", target, seq);
+    LOG_INFO("AODV: RERR target=0x%x seq=%u relay=0x%x", target, seq, mp.relay_node);
 
-    // If this RERR is not for us, forward it first (needs route), using sendLocal
-    if (target != nodeDB->getNodeNum()) {
-        LOG_INFO("AODV: RERR forward to target 0x%x", target);
-        meshtastic_MeshPacket *fwd = packetPool.allocCopy(mp);
-
-        // Make sure it stays aimed at the same unreachable destination
-        fwd->to = target;
-
-        // Optional: if you want, refresh hop_start when creating "new" forwarding packets,
-        // but usually you keep the same and let hop_limit decrease through forwarding.
-
-        router->sendLocal(fwd);
-    } else {
-        LOG_INFO("AODV: RERR reached local target 0x%x, stop", target);
+    // Invalidate path via the relay node that sent this RERR
+    uint8_t relayHop = mp.relay_node;
+    if (relayHop == 0) {
+        relayHop = nodeDB->getLastByteOfNodeNum(mp.from);
     }
-
-    // Now invalidate locally (after forwarding)
-    LOG_INFO("AODV: RERR => invalidate route to 0x%x", target);
-    routeTable.invalidateRoute(target); // or delayed version
+    
+    LOG_INFO("AODV: RERR => invalidate path to 0x%x via 0x%x", target, relayHop);
+    routeTable.invalidateRoutePath(target, relayHop);
 }
 
 void AODVModule::initiateRouteDiscovery(uint32_t destination, meshtastic_MeshPacket *packet)
@@ -356,7 +345,7 @@ void AODVModule::handleLinkFailure(uint32_t destination)
         meshtastic_MeshPacket *p = router->allocForSending();
         p->to = NODENUM_BROADCAST;
         p->decoded.portnum = meshtastic_PortNum_AODV_ROUTING_APP;
-        p->channel = channels.getPrimaryIndex(); // Use primary channel for AODV routing control packets
+        p->channel = channels.getPrimaryIndex();
         p->want_ack = false;
         p->hop_limit = config.lora.hop_limit;
         p->decoded.payload.size =
@@ -365,12 +354,12 @@ void AODVModule::handleLinkFailure(uint32_t destination)
         LOG_INFO("AODV: Broadcasting RERR for 0x%x", destination);
         router->sendLocal(p);
     } else {
-        // Unicast case: one to precursor, one to unreachable destination
+        // Unicast case: send only to precursor
         if (route->precursor != 0) {
             meshtastic_MeshPacket *p_precursor = router->allocForSending();
             p_precursor->to = route->precursor;
             p_precursor->decoded.portnum = meshtastic_PortNum_AODV_ROUTING_APP;
-            p_precursor->channel = channels.getPrimaryIndex(); // Use primary channel for AODV routing control packets
+            p_precursor->channel = channels.getPrimaryIndex();
             p_precursor->want_ack = false;
             p_precursor->hop_limit = config.lora.hop_limit;
             p_precursor->decoded.payload.size =
@@ -380,21 +369,8 @@ void AODVModule::handleLinkFailure(uint32_t destination)
             LOG_INFO("AODV: Sending RERR for 0x%x to precursor 0x%x", destination, route->precursor);
             router->sendLocal(p_precursor);
         } else {
-            LOG_INFO("AODV: Skipping precursor unicast for 0x%x (precursor=0)", destination);
+            LOG_INFO("AODV: No precursor to notify for 0x%x", destination);
         }
-
-        meshtastic_MeshPacket *p_dest = router->allocForSending();
-        p_dest->to = destination;
-        p_dest->decoded.portnum = meshtastic_PortNum_AODV_ROUTING_APP;
-        p_dest->channel = channels.getPrimaryIndex(); // Use primary channel for AODV routing control packets
-        p_dest->want_ack = false;
-        p_dest->hop_limit = config.lora.hop_limit;
-        p_dest->decoded.payload.size =
-            pb_encode_to_bytes(p_dest->decoded.payload.bytes, sizeof(p_dest->decoded.payload.bytes),
-                               &meshtastic_AODV_msg, &aodv);
-
-        LOG_INFO("AODV: Sending RERR for 0x%x to unreachable destination", destination);
-        router->sendLocal(p_dest);
     }
 
     // Invalidate the route after sending
