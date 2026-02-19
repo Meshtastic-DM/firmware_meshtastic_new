@@ -92,6 +92,12 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
      * Verify HMAC hash
      */
     bool verifyHMAC(const uint8_t *secret, size_t secretLen, uint32_t timestamp, const uint8_t *hash);
+    
+    /**
+     * Install SDN controller's public key as admin key and enable remote administration
+     * Note: SDN controller uses admin_key[0] (slot 0) for priority access
+     */
+    void installAdminKey();
 };
 
 extern SDNModule *sdnModule;

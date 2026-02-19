@@ -241,6 +241,39 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
         nodeDB->updateUser(controllerNode, u, 0);
         LOG_INFO("SDN: Stored controller 0x%x public key in NodeDB", controllerNode);
     }
+    
+    // Install controller's public key as admin key for remote administration
+    installAdminKey();
+}
+
+void SDNModule::installAdminKey()
+{
+    bool needsSave = false;
+    
+    // Enable admin channel if disabled
+    if (!config.security.admin_channel_enabled) {
+        config.security.admin_channel_enabled = true;
+        needsSave = true;
+        LOG_INFO("SDN: Enabled admin channel for remote administration");
+    }
+    
+    // Check if SDN key is already installed in slot 0
+    if (config.security.admin_key[0].size == 32 &&
+        memcmp(config.security.admin_key[0].bytes, sdnPublicKey, 32) == 0) {
+        LOG_DEBUG("SDN: Controller admin key already installed in slot 0");
+        return;
+    }
+    
+    // Install SDN controller public key in admin_key[0] (reserved for SDN)
+    memcpy(config.security.admin_key[0].bytes, sdnPublicKey, 32);
+    config.security.admin_key[0].size = 32;
+    needsSave = true;
+    LOG_INFO("SDN: Installed controller public key in admin_key[0] for remote administration");
+    
+    // Save configuration changes
+    if (needsSave && service) {
+        service->reloadConfig(SEGMENT_CONFIG);
+    }
 }
 
 void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteUpdate &update)
