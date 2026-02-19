@@ -75,18 +75,18 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
     // Are we the destination?
     if (rreq.destination == nodeDB->getNodeNum()) {
         // Check if we've already seen this RREQ from this relay path
-        if (hasSeenRREQ(rreq.originator, rreq.rreq_id, prevHop)) {
+        if (hasSeenRREQ(rreq.originator, rreq.dest_seq_num, prevHop)) {
             LOG_DEBUG("AODV: Duplicate RREQ from same path, ignoring");
             return;
         }
         
-        // Mark as seen from this relay path
-        markRREQAsSeen(rreq.originator, rreq.rreq_id, prevHop);
+        // Mark as seen and get response seq num (increments only on first, reuses for alternate paths)
+        uint32_t mySeqNum = markRREQAsSeen(rreq.originator, rreq.dest_seq_num, prevHop);
         
-        LOG_INFO("AODV RREQ TARGET: from=0x%x, ID=%u, hops=%d", rreq.originator, rreq.rreq_id, hopCount);
-        // Increment our sequence number (destination always has fresh seq num)
-        uint32_t mySeqNum = routeTable.incrementMySeqNum();
-        LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=0, next_hop=0x%x", rreq.originator, rreq.destination, mySeqNum, prevHop);
+        LOG_INFO("AODV RREQ TARGET: from=0x%x, ID=%u, dest_seq=%u, hops=%d, response_seq=%u", 
+                 rreq.originator, rreq.rreq_id, rreq.dest_seq_num, hopCount, mySeqNum);
+        LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=0, next_hop=0x%x", 
+                 rreq.originator, rreq.destination, mySeqNum, prevHop);
         sendRREP(rreq.originator, rreq.destination, mySeqNum, 0, prevHop); // 0 hops to ourselves, next_hop is who sent us the RREQ
         // Cancel rebroadcast of RREQ since we are the target
         router->cancelSending(mp.from, mp.id);
@@ -377,38 +377,72 @@ void AODVModule::handleLinkFailure(uint32_t destination)
     routeTable.invalidateRoute(destination);
 }
 
-bool AODVModule::hasSeenRREQ(uint32_t originator, uint32_t rreqId, uint8_t relayNode)
+bool AODVModule::hasSeenRREQ(uint32_t originator, uint32_t destSeqNum, uint8_t relayNode)
 {
-    auto it = seenRREQs.find(originator);
-    if (it == seenRREQs.end()) {
+    auto originatorIt = seenRREQs.find(originator);
+    if (originatorIt == seenRREQs.end()) {
         return false; // Never seen this originator
     }
     
-    const auto& rreqList = it->second;
-    
-    // Check if we've reached the limit for this originator
-    if (rreqList.size() >= AODV_MAX_RREQ_PER_ORIGINATOR) {
-        return true; // Limit reached, reject any further RREQs
+    auto& destSeqMap = originatorIt->second;
+    auto destSeqIt = destSeqMap.find(destSeqNum);
+    if (destSeqIt == destSeqMap.end()) {
+        return false; // Never seen this dest_seq_num from this originator
     }
     
-    // Check for exact match of (rreqId, relayNode)
-    for (const auto& entry : rreqList) {
-        if (std::get<0>(entry) == rreqId && std::get<1>(entry) == relayNode) {
-            return true; // Already seen this exact RREQ from this relay
+    auto& relayList = destSeqIt->second.second; // second element of pair is the vector
+    
+    // Check if we've reached the limit for this dest_seq_num
+    if (relayList.size() >= AODV_MAX_RREQ_PER_ORIGINATOR) {
+        return true; // Limit reached, reject any further relay paths
+    }
+    
+    // Check for exact match of relayNode
+    for (const auto& relayEntry : relayList) {
+        if (relayEntry.first == relayNode) {
+            return true; // Already seen this exact relay path
         }
     }
     
     return false;
 }
 
-void AODVModule::markRREQAsSeen(uint32_t originator, uint32_t rreqId, uint8_t relayNode)
+uint32_t AODVModule::markRREQAsSeen(uint32_t originator, uint32_t destSeqNum, uint8_t relayNode)
 {
-    auto& rreqList = seenRREQs[originator];
+    auto& destSeqMap = seenRREQs[originator];
     
-    // Only add if we haven't reached the limit
-    if (rreqList.size() < AODV_MAX_RREQ_PER_ORIGINATOR) {
-        rreqList.push_back(std::make_tuple(rreqId, relayNode, millis()));
+    uint32_t responseSeqNum;
+    
+    auto destSeqIt = destSeqMap.find(destSeqNum);
+    if (destSeqIt == destSeqMap.end()) {
+        // First time seeing this dest_seq_num - generate new response seq num
+        responseSeqNum = routeTable.incrementMySeqNum();
+        
+        // Create new entry with response_seq_num and empty relay list
+        std::vector<std::pair<uint8_t, uint32_t>> relayList;
+        relayList.push_back(std::make_pair(relayNode, millis()));
+        
+        destSeqMap[destSeqNum] = std::make_pair(responseSeqNum, relayList);
+        
+        LOG_DEBUG("AODV: Generated new response_seq=%u for dest_seq=%u (first path)", 
+                  responseSeqNum, destSeqNum);
+    } else {
+        // Already have entry for this dest_seq_num - reuse response_seq_num
+        responseSeqNum = destSeqIt->second.first;
+        auto& relayList = destSeqIt->second.second;
+        
+        // Add this relay path if we haven't reached the limit
+        if (relayList.size() < AODV_MAX_RREQ_PER_ORIGINATOR) {
+            relayList.push_back(std::make_pair(relayNode, millis()));
+            LOG_DEBUG("AODV: Reusing response_seq=%u for dest_seq=%u (alternate path #%d)", 
+                      responseSeqNum, destSeqNum, (int)relayList.size());
+        } else {
+            LOG_WARN("AODV: Max relay paths reached for dest_seq=%u from orig=0x%x", 
+                     destSeqNum, originator);
+        }
     }
+    
+    return responseSeqNum;
 }
 
 void AODVModule::forwardRREQ(const meshtastic_MeshPacket &receivedPacket, const meshtastic_RouteRequest &rreq)
@@ -509,23 +543,36 @@ void AODVModule::deliverBufferedPackets(uint32_t destination)
 void AODVModule::cleanupSeenRREQs()
 {
     uint32_t now = millis();
-    for (auto it = seenRREQs.begin(); it != seenRREQs.end();) {
-        auto& rreqList = it->second;
+    
+    for (auto originatorIt = seenRREQs.begin(); originatorIt != seenRREQs.end();) {
+        auto& destSeqMap = originatorIt->second;
         
-        // Remove RREQs older than NET_TRAVERSAL_TIME * 2
-        rreqList.erase(
-            std::remove_if(rreqList.begin(), rreqList.end(),
-                [now](const std::tuple<uint32_t, uint8_t, uint32_t>& entry) {
-                    return now - std::get<2>(entry) > AODV_NET_TRAVERSAL_TIME * 2;
-                }),
-            rreqList.end()
-        );
+        // Clean up each dest_seq_num entry
+        for (auto destSeqIt = destSeqMap.begin(); destSeqIt != destSeqMap.end();) {
+            auto& relayList = destSeqIt->second.second;
+            
+            // Remove expired relay entries
+            relayList.erase(
+                std::remove_if(relayList.begin(), relayList.end(),
+                    [now](const std::pair<uint8_t, uint32_t>& relayEntry) {
+                        return now - relayEntry.second > AODV_NET_TRAVERSAL_TIME * 2;
+                    }),
+                relayList.end()
+            );
+            
+            // Remove dest_seq_num entry if no relay paths remain
+            if (relayList.empty()) {
+                destSeqIt = destSeqMap.erase(destSeqIt);
+            } else {
+                ++destSeqIt;
+            }
+        }
         
-        // Remove originator entry if all RREQs expired
-        if (rreqList.empty()) {
-            it = seenRREQs.erase(it);
+        // Remove originator entry if no dest_seq_num entries remain
+        if (destSeqMap.empty()) {
+            originatorIt = seenRREQs.erase(originatorIt);
         } else {
-            ++it;
+            ++originatorIt;
         }
     }
 }
