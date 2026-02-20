@@ -1,0 +1,6 @@
+# options for nanopb
+# https://jpa.kapsi.fi/nanopb/docs/reference.html#proto-file-options
+
+# Configure byte fields as static arrays (using PB_BYTES_ARRAY_T for .size and .bytes access)
+*SDNAnnouncement.hmac_hash max_size:16
+*SDNAnnouncement.public_key max_size:32

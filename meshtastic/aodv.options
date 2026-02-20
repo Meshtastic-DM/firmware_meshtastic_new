@@ -1,0 +1,8 @@
+# options for nanopb
+# https://jpa.kapsi.fi/nanopb/docs/reference.html#proto-file-options
+
+# Configure RouteError unreachable_destinations as a static array
+*.RouteError.unreachable_destinations max_count:8
+
+# Configure RouteTableResponse routes as a static array
+*.RouteTableResponse.routes max_count:20
