@@ -198,6 +198,67 @@ void AODVRouteTable::addPrecursor(uint32_t destination, uint32_t precursorNode)
     }
 }
 
+bool AODVRouteTable::activateBackupRoute(uint32_t destination, uint8_t nextHop)
+{
+    auto it = routes.find(destination);
+    if (it == routes.end() || it->second.empty()) {
+        LOG_DEBUG("AODV: Cannot activate backup route - no routes to dest=0x%x", destination);
+        return false;
+    }
+
+    auto &routeList = it->second;
+    
+    // Clean up expired routes first
+    routeList.erase(std::remove_if(routeList.begin(), routeList.end(),
+                                  [](AODVRouteEntry &r) {
+                                      if (r.isExpired()) {
+                                          r.isValid = false;
+                                          return true;
+                                      }
+                                      return false;
+                                  }),
+                   routeList.end());
+    
+    if (routeList.empty()) {
+        LOG_DEBUG("AODV: Cannot activate backup route - all routes expired to dest=0x%x", destination);
+        return false;
+    }
+    
+    // Find the backup route with matching nextHop
+    int backupIndex = -1;
+    for (size_t i = 0; i < routeList.size(); i++) {
+        if (routeList[i].nextHop == nextHop && routeList[i].isValid && !routeList[i].isExpired()) {
+            backupIndex = i;
+            break;
+        }
+    }
+    
+    if (backupIndex == -1) {
+        LOG_WARN("AODV: Cannot activate backup route - next_hop=0x%x not found for dest=0x%x", 
+                 nextHop, destination);
+        return false;
+    }
+    
+    if (backupIndex == 0) {
+        LOG_DEBUG("AODV: Route next_hop=0x%x already primary for dest=0x%x", nextHop, destination);
+        return true; // Already primary
+    }
+    
+    // Swap backup route to primary position
+    uint8_t oldPrimaryNextHop = routeList[0].nextHop;
+    std::swap(routeList[0], routeList[backupIndex]);
+    
+    // Update pathId after swap
+    for (size_t i = 0; i < routeList.size(); i++) {
+        routeList[i].pathId = i;
+    }
+    
+    LOG_INFO("AODV: Activated backup route for dest=0x%x: next_hop=0x%x (was 0x%x), hops=%u, pathId=%u->0",
+             destination, nextHop, oldPrimaryNextHop, routeList[0].hopCount, backupIndex);
+    
+    return true;
+}
+
 bool AODVRouteTable::hasPendingRREQ(uint32_t destination)
 {
     auto it = pendingRREQs.find(destination);

@@ -141,6 +141,9 @@ bool SDNModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtast
     case meshtastic_SDN_route_update_tag:
         handleSDNRouteUpdate(mp, sdn->payload_variant.route_update);
         break;
+    case meshtastic_SDN_route_command_tag:
+        handleSDNRouteCommand(mp, sdn->payload_variant.route_command);
+        break;
     default:
         LOG_WARN("SDN: Unknown message variant");
         break;
@@ -291,6 +294,29 @@ void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const mesh
     // For now, only announcements are authenticated.
 }
 
+void SDNModule::handleSDNRouteCommand(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteCommand &cmd)
+{
+    LOG_INFO("SDN: Received route command from 0x%x: dest=0x%x, next_hop=0x%x",
+             mp.from, cmd.destination, cmd.next_hop);
+
+    // Check if AODV module is available
+    if (!aodvModule || !aodvModule->getRouteTable()) {
+        LOG_WARN("SDN: Cannot process route command - AODV module unavailable");
+        return;
+    }
+
+    // Attempt to activate the backup route
+    bool success = aodvModule->getRouteTable()->activateBackupRoute(cmd.destination, (uint8_t)cmd.next_hop);
+    
+    if (success) {
+        LOG_INFO("SDN: Successfully activated backup route for dest=0x%x via next_hop=0x%x",
+                 cmd.destination, cmd.next_hop);
+    } else {
+        LOG_WARN("SDN: Failed to activate backup route for dest=0x%x via next_hop=0x%x",
+                 cmd.destination, cmd.next_hop);
+    }
+}
+
 void SDNModule::sendAnnouncement()
 {
     if (!isSDNController) {
@@ -413,7 +439,7 @@ void SDNModule::sendRouteUpdate(uint32_t destination, uint8_t nextHop, uint8_t h
     p->to = sdnControllerNode;
     p->decoded.portnum = meshtastic_PortNum_SDN_APP;
     p->channel = channels.getPrimaryIndex();
-    p->want_ack = true;
+    p->want_ack = false;
     p->hop_limit = config.lora.hop_limit;
 
     p->decoded.payload.size = pb_encode_to_bytes(
@@ -425,6 +451,41 @@ void SDNModule::sendRouteUpdate(uint32_t destination, uint8_t nextHop, uint8_t h
 
     LOG_INFO("SDN: Sending route update for dest=0x%x (next_hop=0x%x, hops=%u) to controller 0x%x",
              destination, nextHop, hopCount, sdnControllerNode);
+    router->sendLocal(p);
+}
+
+void SDNModule::sendRouteCommand(uint32_t targetNode, uint32_t destination, uint8_t nextHop)
+{
+    if (targetNode == 0) {
+        LOG_WARN("SDN: Invalid target node for route command");
+        return;
+    }
+
+    meshtastic_SDNRouteCommand cmd = meshtastic_SDNRouteCommand_init_default;
+
+    cmd.destination = destination;
+    cmd.next_hop = nextHop;
+
+    meshtastic_SDN sdn = meshtastic_SDN_init_default;
+    sdn.which_payload_variant = meshtastic_SDN_route_command_tag;
+    sdn.payload_variant.route_command = cmd;
+
+    meshtastic_MeshPacket *p = router->allocForSending();
+    p->to = targetNode;
+    p->decoded.portnum = meshtastic_PortNum_SDN_APP;
+    p->channel = channels.getPrimaryIndex();
+    p->want_ack = false;
+    p->hop_limit = config.lora.hop_limit;
+
+    p->decoded.payload.size = pb_encode_to_bytes(
+        p->decoded.payload.bytes,
+        sizeof(p->decoded.payload.bytes),
+        &meshtastic_SDN_msg,
+        &sdn
+    );
+
+    LOG_INFO("SDN: Sending route command to node 0x%x: activate dest=0x%x via next_hop=0x%x",
+             targetNode, destination, nextHop);
     router->sendLocal(p);
 }
 

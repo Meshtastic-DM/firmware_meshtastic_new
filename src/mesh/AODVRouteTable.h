@@ -111,6 +111,7 @@ class AODVRouteTable
     void removeExpiredRoutes();
     void addPrecursor(uint32_t destination, uint32_t precursorNode);
     size_t getRoutePathCount(uint32_t destination) const; // Returns number of paths for destination
+    bool activateBackupRoute(uint32_t destination, uint8_t nextHop); // Activate backup route as primary
 
     // Sequence number management
     uint32_t getMySeqNum() { return mySeqNum; }

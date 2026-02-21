@@ -52,6 +52,11 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
     void handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteUpdate &update);
     
     /**
+     * Handle route command from controller
+     */
+    void handleSDNRouteCommand(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteCommand &cmd);
+    
+    /**
      * Send announcement broadcast (controller only)
      */
     void sendAnnouncement();
@@ -60,6 +65,11 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
      * Send route update to SDN controller
      */
     void sendRouteUpdate(uint32_t destination, uint8_t nextHop, uint8_t hopCount, uint32_t destSeqNum);
+    
+    /**
+     * Send route command to target node (activate backup path)
+     */
+    void sendRouteCommand(uint32_t targetNode, uint32_t destination, uint8_t nextHop);
     
     /**
      * Check if SDN controller is authenticated
