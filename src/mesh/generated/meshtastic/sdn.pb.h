@@ -65,6 +65,59 @@ typedef struct _meshtastic_SDNRouteCommand {
 } meshtastic_SDNRouteCommand;
 
 /* *
+ Route installation command sent by SDN controller to start node
+ Initiates cascading route setup through hop-by-hop forwarding */
+typedef struct _meshtastic_SDNRouteInstall {
+    /* *
+ Final destination node (32-bit full node number) */
+    uint32_t destination;
+    /* *
+ Packed hop path: 8 bytes, each byte is one hop (1-byte node ID)
+ LSB = first hop, zero bytes mark end of path */
+    uint64_t hop_path;
+    /* *
+ Installation ID for tracking (0-255) */
+    uint32_t install_id;
+} meshtastic_SDNRouteInstall;
+
+/* *
+ Route set message propagated hop-by-hop from start to destination
+ Each intermediate node installs forward and reverse routes */
+typedef struct _meshtastic_SDNRouteSet {
+    /* *
+ Final destination node (32-bit full node number) */
+    uint32_t destination;
+    /* *
+ Packed hop path: remaining hops to traverse
+ Path is shifted at each hop (first hop removed) */
+    uint64_t hop_path;
+    /* *
+ Installation ID for tracking (0-255) */
+    uint32_t install_id;
+    /* *
+ Start node's AODV sequence number for reverse route installation */
+    uint32_t dest_seq_num;
+} meshtastic_SDNRouteSet;
+
+/* *
+ Confirmation sent by destination back to controller
+ Reports success or failure of route installation */
+typedef struct _meshtastic_SDNRouteSetConfirm {
+    /* *
+ Destination node that was reached (32-bit full node number) */
+    uint32_t destination;
+    /* *
+ Installation ID to correlate with original request */
+    uint32_t install_id;
+    /* *
+ True if route installation succeeded */
+    bool success;
+    /* *
+ Optional error message if installation failed */
+    char error_msg[41];
+} meshtastic_SDNRouteSetConfirm;
+
+/* *
  SDN message wrapper */
 typedef struct _meshtastic_SDN {
     pb_size_t which_payload_variant;
@@ -72,6 +125,9 @@ typedef struct _meshtastic_SDN {
         meshtastic_SDNAnnouncement announcement;
         meshtastic_SDNRouteUpdate route_update;
         meshtastic_SDNRouteCommand route_command;
+        meshtastic_SDNRouteInstall route_install;
+        meshtastic_SDNRouteSet route_set;
+        meshtastic_SDNRouteSetConfirm route_set_confirm;
     } payload_variant;
 } meshtastic_SDN;
 
@@ -84,10 +140,16 @@ extern "C" {
 #define meshtastic_SDNAnnouncement_init_default  {{0, {0}}, {0, {0}}, 0, 0}
 #define meshtastic_SDNRouteUpdate_init_default   {0, 0, 0, 0, 0, 0}
 #define meshtastic_SDNRouteCommand_init_default  {0, 0}
+#define meshtastic_SDNRouteInstall_init_default  {0, 0, 0}
+#define meshtastic_SDNRouteSet_init_default      {0, 0, 0, 0}
+#define meshtastic_SDNRouteSetConfirm_init_default {0, 0, 0, ""}
 #define meshtastic_SDN_init_default              {0, {meshtastic_SDNAnnouncement_init_default}}
 #define meshtastic_SDNAnnouncement_init_zero     {{0, {0}}, {0, {0}}, 0, 0}
 #define meshtastic_SDNRouteUpdate_init_zero      {0, 0, 0, 0, 0, 0}
 #define meshtastic_SDNRouteCommand_init_zero     {0, 0}
+#define meshtastic_SDNRouteInstall_init_zero     {0, 0, 0}
+#define meshtastic_SDNRouteSet_init_zero         {0, 0, 0, 0}
+#define meshtastic_SDNRouteSetConfirm_init_zero  {0, 0, 0, ""}
 #define meshtastic_SDN_init_zero                 {0, {meshtastic_SDNAnnouncement_init_zero}}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -103,9 +165,23 @@ extern "C" {
 #define meshtastic_SDNRouteUpdate_timestamp_tag  6
 #define meshtastic_SDNRouteCommand_destination_tag 1
 #define meshtastic_SDNRouteCommand_next_hop_tag  2
+#define meshtastic_SDNRouteInstall_destination_tag 1
+#define meshtastic_SDNRouteInstall_hop_path_tag  2
+#define meshtastic_SDNRouteInstall_install_id_tag 3
+#define meshtastic_SDNRouteSet_destination_tag   1
+#define meshtastic_SDNRouteSet_hop_path_tag      2
+#define meshtastic_SDNRouteSet_install_id_tag    3
+#define meshtastic_SDNRouteSet_dest_seq_num_tag  4
+#define meshtastic_SDNRouteSetConfirm_destination_tag 1
+#define meshtastic_SDNRouteSetConfirm_install_id_tag 2
+#define meshtastic_SDNRouteSetConfirm_success_tag 3
+#define meshtastic_SDNRouteSetConfirm_error_msg_tag 4
 #define meshtastic_SDN_announcement_tag          1
 #define meshtastic_SDN_route_update_tag          2
 #define meshtastic_SDN_route_command_tag         3
+#define meshtastic_SDN_route_install_tag         4
+#define meshtastic_SDN_route_set_tag             5
+#define meshtastic_SDN_route_set_confirm_tag     6
 
 /* Struct field encoding specification for nanopb */
 #define meshtastic_SDNAnnouncement_FIELDLIST(X, a) \
@@ -132,31 +208,69 @@ X(a, STATIC,   SINGULAR, UINT32,   next_hop,          2)
 #define meshtastic_SDNRouteCommand_CALLBACK NULL
 #define meshtastic_SDNRouteCommand_DEFAULT NULL
 
+#define meshtastic_SDNRouteInstall_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, FIXED32,  destination,       1) \
+X(a, STATIC,   SINGULAR, FIXED64,  hop_path,          2) \
+X(a, STATIC,   SINGULAR, UINT32,   install_id,        3)
+#define meshtastic_SDNRouteInstall_CALLBACK NULL
+#define meshtastic_SDNRouteInstall_DEFAULT NULL
+
+#define meshtastic_SDNRouteSet_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, FIXED32,  destination,       1) \
+X(a, STATIC,   SINGULAR, FIXED64,  hop_path,          2) \
+X(a, STATIC,   SINGULAR, UINT32,   install_id,        3) \
+X(a, STATIC,   SINGULAR, UINT32,   dest_seq_num,      4)
+#define meshtastic_SDNRouteSet_CALLBACK NULL
+#define meshtastic_SDNRouteSet_DEFAULT NULL
+
+#define meshtastic_SDNRouteSetConfirm_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, FIXED32,  destination,       1) \
+X(a, STATIC,   SINGULAR, UINT32,   install_id,        2) \
+X(a, STATIC,   SINGULAR, BOOL,     success,           3) \
+X(a, STATIC,   SINGULAR, STRING,   error_msg,         4)
+#define meshtastic_SDNRouteSetConfirm_CALLBACK NULL
+#define meshtastic_SDNRouteSetConfirm_DEFAULT NULL
+
 #define meshtastic_SDN_FIELDLIST(X, a) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,announcement,payload_variant.announcement),   1) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_update,payload_variant.route_update),   2) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_command,payload_variant.route_command),   3)
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_command,payload_variant.route_command),   3) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_install,payload_variant.route_install),   4) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_set,payload_variant.route_set),   5) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_set_confirm,payload_variant.route_set_confirm),   6)
 #define meshtastic_SDN_CALLBACK NULL
 #define meshtastic_SDN_DEFAULT NULL
 #define meshtastic_SDN_payload_variant_announcement_MSGTYPE meshtastic_SDNAnnouncement
 #define meshtastic_SDN_payload_variant_route_update_MSGTYPE meshtastic_SDNRouteUpdate
 #define meshtastic_SDN_payload_variant_route_command_MSGTYPE meshtastic_SDNRouteCommand
+#define meshtastic_SDN_payload_variant_route_install_MSGTYPE meshtastic_SDNRouteInstall
+#define meshtastic_SDN_payload_variant_route_set_MSGTYPE meshtastic_SDNRouteSet
+#define meshtastic_SDN_payload_variant_route_set_confirm_MSGTYPE meshtastic_SDNRouteSetConfirm
 
 extern const pb_msgdesc_t meshtastic_SDNAnnouncement_msg;
 extern const pb_msgdesc_t meshtastic_SDNRouteUpdate_msg;
 extern const pb_msgdesc_t meshtastic_SDNRouteCommand_msg;
+extern const pb_msgdesc_t meshtastic_SDNRouteInstall_msg;
+extern const pb_msgdesc_t meshtastic_SDNRouteSet_msg;
+extern const pb_msgdesc_t meshtastic_SDNRouteSetConfirm_msg;
 extern const pb_msgdesc_t meshtastic_SDN_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
 #define meshtastic_SDNAnnouncement_fields &meshtastic_SDNAnnouncement_msg
 #define meshtastic_SDNRouteUpdate_fields &meshtastic_SDNRouteUpdate_msg
 #define meshtastic_SDNRouteCommand_fields &meshtastic_SDNRouteCommand_msg
+#define meshtastic_SDNRouteInstall_fields &meshtastic_SDNRouteInstall_msg
+#define meshtastic_SDNRouteSet_fields &meshtastic_SDNRouteSet_msg
+#define meshtastic_SDNRouteSetConfirm_fields &meshtastic_SDNRouteSetConfirm_msg
 #define meshtastic_SDN_fields &meshtastic_SDN_msg
 
 /* Maximum encoded size of messages (where known) */
 #define MESHTASTIC_MESHTASTIC_SDN_PB_H_MAX_SIZE  meshtastic_SDN_size
 #define meshtastic_SDNAnnouncement_size          63
 #define meshtastic_SDNRouteCommand_size          11
+#define meshtastic_SDNRouteInstall_size          20
+#define meshtastic_SDNRouteSetConfirm_size       55
+#define meshtastic_SDNRouteSet_size              26
 #define meshtastic_SDNRouteUpdate_size           33
 #define meshtastic_SDN_size                      65
 
