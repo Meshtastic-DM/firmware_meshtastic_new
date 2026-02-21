@@ -53,12 +53,25 @@ typedef struct _meshtastic_SDNRouteUpdate {
 } meshtastic_SDNRouteUpdate;
 
 /* *
+ Route command sent by SDN controller to activate a backup path
+ Tells a node to switch its active route for a destination to use a specific next hop */
+typedef struct _meshtastic_SDNRouteCommand {
+    /* *
+ Destination node to switch route for (32-bit full node number) */
+    uint32_t destination;
+    /* *
+ Next hop to activate as primary path (8-bit last byte) */
+    uint32_t next_hop;
+} meshtastic_SDNRouteCommand;
+
+/* *
  SDN message wrapper */
 typedef struct _meshtastic_SDN {
     pb_size_t which_payload_variant;
     union {
         meshtastic_SDNAnnouncement announcement;
         meshtastic_SDNRouteUpdate route_update;
+        meshtastic_SDNRouteCommand route_command;
     } payload_variant;
 } meshtastic_SDN;
 
@@ -70,9 +83,11 @@ extern "C" {
 /* Initializer values for message structs */
 #define meshtastic_SDNAnnouncement_init_default  {{0, {0}}, {0, {0}}, 0, 0}
 #define meshtastic_SDNRouteUpdate_init_default   {0, 0, 0, 0, 0, 0}
+#define meshtastic_SDNRouteCommand_init_default  {0, 0}
 #define meshtastic_SDN_init_default              {0, {meshtastic_SDNAnnouncement_init_default}}
 #define meshtastic_SDNAnnouncement_init_zero     {{0, {0}}, {0, {0}}, 0, 0}
 #define meshtastic_SDNRouteUpdate_init_zero      {0, 0, 0, 0, 0, 0}
+#define meshtastic_SDNRouteCommand_init_zero     {0, 0}
 #define meshtastic_SDN_init_zero                 {0, {meshtastic_SDNAnnouncement_init_zero}}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -86,8 +101,11 @@ extern "C" {
 #define meshtastic_SDNRouteUpdate_dest_seq_num_tag 4
 #define meshtastic_SDNRouteUpdate_reporter_node_tag 5
 #define meshtastic_SDNRouteUpdate_timestamp_tag  6
+#define meshtastic_SDNRouteCommand_destination_tag 1
+#define meshtastic_SDNRouteCommand_next_hop_tag  2
 #define meshtastic_SDN_announcement_tag          1
 #define meshtastic_SDN_route_update_tag          2
+#define meshtastic_SDN_route_command_tag         3
 
 /* Struct field encoding specification for nanopb */
 #define meshtastic_SDNAnnouncement_FIELDLIST(X, a) \
@@ -108,26 +126,37 @@ X(a, STATIC,   SINGULAR, FIXED32,  timestamp,         6)
 #define meshtastic_SDNRouteUpdate_CALLBACK NULL
 #define meshtastic_SDNRouteUpdate_DEFAULT NULL
 
+#define meshtastic_SDNRouteCommand_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, FIXED32,  destination,       1) \
+X(a, STATIC,   SINGULAR, UINT32,   next_hop,          2)
+#define meshtastic_SDNRouteCommand_CALLBACK NULL
+#define meshtastic_SDNRouteCommand_DEFAULT NULL
+
 #define meshtastic_SDN_FIELDLIST(X, a) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,announcement,payload_variant.announcement),   1) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_update,payload_variant.route_update),   2)
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_update,payload_variant.route_update),   2) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_command,payload_variant.route_command),   3)
 #define meshtastic_SDN_CALLBACK NULL
 #define meshtastic_SDN_DEFAULT NULL
 #define meshtastic_SDN_payload_variant_announcement_MSGTYPE meshtastic_SDNAnnouncement
 #define meshtastic_SDN_payload_variant_route_update_MSGTYPE meshtastic_SDNRouteUpdate
+#define meshtastic_SDN_payload_variant_route_command_MSGTYPE meshtastic_SDNRouteCommand
 
 extern const pb_msgdesc_t meshtastic_SDNAnnouncement_msg;
 extern const pb_msgdesc_t meshtastic_SDNRouteUpdate_msg;
+extern const pb_msgdesc_t meshtastic_SDNRouteCommand_msg;
 extern const pb_msgdesc_t meshtastic_SDN_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
 #define meshtastic_SDNAnnouncement_fields &meshtastic_SDNAnnouncement_msg
 #define meshtastic_SDNRouteUpdate_fields &meshtastic_SDNRouteUpdate_msg
+#define meshtastic_SDNRouteCommand_fields &meshtastic_SDNRouteCommand_msg
 #define meshtastic_SDN_fields &meshtastic_SDN_msg
 
 /* Maximum encoded size of messages (where known) */
 #define MESHTASTIC_MESHTASTIC_SDN_PB_H_MAX_SIZE  meshtastic_SDN_size
 #define meshtastic_SDNAnnouncement_size          63
+#define meshtastic_SDNRouteCommand_size          11
 #define meshtastic_SDNRouteUpdate_size           33
 #define meshtastic_SDN_size                      65
 

@@ -12,6 +12,9 @@ PB_BIND(meshtastic_SDNAnnouncement, meshtastic_SDNAnnouncement, AUTO)
 PB_BIND(meshtastic_SDNRouteUpdate, meshtastic_SDNRouteUpdate, AUTO)
 
 
+PB_BIND(meshtastic_SDNRouteCommand, meshtastic_SDNRouteCommand, AUTO)
+
+
 PB_BIND(meshtastic_SDN, meshtastic_SDN, AUTO)
 
 
