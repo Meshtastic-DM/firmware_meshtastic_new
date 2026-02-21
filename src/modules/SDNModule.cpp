@@ -281,6 +281,24 @@ void SDNModule::installAdminKey()
 
 void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteUpdate &update)
 {
+    // If we are the next hop, add reverse route to reporter node via relay
+    uint8_t ourLastByte = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
+    if (mp.next_hop == ourLastByte) {
+        if (aodvModule && aodvModule->getRouteTable()) {
+            uint8_t relayNode = mp.relay_node;
+            if (relayNode == 0) {
+                relayNode = nodeDB->getLastByteOfNodeNum(mp.from);
+            }
+            
+            // Add route to reporter with relay as next hop
+            uint8_t hopCount = mp.hop_start - mp.hop_limit + 1;
+            aodvModule->getRouteTable()->updateRoute(update.reporter_node, relayNode, hopCount, update.dest_seq_num);
+            
+            LOG_INFO("SDN: Added reverse route to reporter 0x%x via relay 0x%x (hops=%u)",
+                     update.reporter_node, relayNode, hopCount);
+        }
+    }
+
     if (!isSDNController) {
         LOG_DEBUG("SDN: Received route update but not a controller, ignoring");
         return;
