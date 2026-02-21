@@ -296,6 +296,13 @@ void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const mesh
 
 void SDNModule::handleSDNRouteCommand(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteCommand &cmd)
 {
+    // Ignore route commands not addressed to us
+    if (mp.to != nodeDB->getNodeNum()) {
+        LOG_DEBUG("SDN: Ignoring route command not addressed to us (to=0x%x, us=0x%x)",
+                  mp.to, nodeDB->getNodeNum());
+        return;
+    }
+
     LOG_INFO("SDN: Received route command from 0x%x: dest=0x%x, next_hop=0x%x",
              mp.from, cmd.destination, cmd.next_hop);
 
