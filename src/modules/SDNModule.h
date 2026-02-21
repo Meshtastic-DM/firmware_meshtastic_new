@@ -33,6 +33,9 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
     uint8_t hmacSecret[32];            // Shared secret for HMAC verification
     size_t hmacSecretLen;              // Length of secret
     
+    // Route installation tracking
+    uint8_t nextInstallId;             // Next installation ID (0-255, auto-wraps)
+    
   public:
     SDNModule();
     
@@ -57,6 +60,21 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
     void handleSDNRouteCommand(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteCommand &cmd);
     
     /**
+     * Handle route installation command from controller
+     */
+    void handleSDNRouteInstall(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteInstall &install);
+    
+    /**
+     * Handle route set message (cascading hop-by-hop)
+     */
+    void handleSDNRouteSet(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteSet &routeSet);
+    
+    /**
+     * Handle route set confirmation from destination
+     */
+    void handleSDNRouteSetConfirm(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteSetConfirm &confirm);
+    
+    /**
      * Send announcement broadcast (controller only)
      */
     void sendAnnouncement();
@@ -70,6 +88,14 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
      * Send route command to target node (activate backup path)
      */
     void sendRouteCommand(uint32_t targetNode, uint32_t destination, uint8_t nextHop);
+    
+    /**
+     * Send route installation command to start node
+     * Initiates cascading route setup through specified hop path
+     * @param destination Final destination node (32-bit full node ID)
+     * @param hopPath Vector of 1-byte node IDs (max 8 hops)
+     */
+    void sendRouteInstall(uint32_t destination, const std::vector<uint8_t> &hopPath);
     
     /**
      * Check if SDN controller is authenticated
