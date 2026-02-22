@@ -657,7 +657,7 @@ void SDNModule::handleSDNRouteSet(const meshtastic_MeshPacket &mp, const meshtas
         }
 
         // Check if we are the final destination
-        if (mp.to == nodeDB->getNodeNum() && routeSet.destination == nodeDB->getNodeNum()) {
+        if (mp.to == nodeDB->getNodeNum()) {
             LOG_INFO("SDN: RouteSet reached final destination (install_id=%u)", (uint8_t)routeSet.install_id);
             
             // Send confirmation back to controller
