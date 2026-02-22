@@ -94,9 +94,6 @@ typedef struct _meshtastic_SDNRouteSet {
     /* *
  Installation ID for tracking (0-255) */
     uint32_t install_id;
-    /* *
- Start node's AODV sequence number for reverse route installation */
-    uint32_t dest_seq_num;
 } meshtastic_SDNRouteSet;
 
 /* *
@@ -141,14 +138,14 @@ extern "C" {
 #define meshtastic_SDNRouteUpdate_init_default   {0, 0, 0, 0, 0, 0}
 #define meshtastic_SDNRouteCommand_init_default  {0, 0}
 #define meshtastic_SDNRouteInstall_init_default  {0, 0, 0}
-#define meshtastic_SDNRouteSet_init_default      {0, 0, 0, 0}
+#define meshtastic_SDNRouteSet_init_default      {0, 0, 0}
 #define meshtastic_SDNRouteSetConfirm_init_default {0, 0, 0, ""}
 #define meshtastic_SDN_init_default              {0, {meshtastic_SDNAnnouncement_init_default}}
 #define meshtastic_SDNAnnouncement_init_zero     {{0, {0}}, {0, {0}}, 0, 0}
 #define meshtastic_SDNRouteUpdate_init_zero      {0, 0, 0, 0, 0, 0}
 #define meshtastic_SDNRouteCommand_init_zero     {0, 0}
 #define meshtastic_SDNRouteInstall_init_zero     {0, 0, 0}
-#define meshtastic_SDNRouteSet_init_zero         {0, 0, 0, 0}
+#define meshtastic_SDNRouteSet_init_zero         {0, 0, 0}
 #define meshtastic_SDNRouteSetConfirm_init_zero  {0, 0, 0, ""}
 #define meshtastic_SDN_init_zero                 {0, {meshtastic_SDNAnnouncement_init_zero}}
 
@@ -171,7 +168,6 @@ extern "C" {
 #define meshtastic_SDNRouteSet_destination_tag   1
 #define meshtastic_SDNRouteSet_hop_path_tag      2
 #define meshtastic_SDNRouteSet_install_id_tag    3
-#define meshtastic_SDNRouteSet_dest_seq_num_tag  4
 #define meshtastic_SDNRouteSetConfirm_destination_tag 1
 #define meshtastic_SDNRouteSetConfirm_install_id_tag 2
 #define meshtastic_SDNRouteSetConfirm_success_tag 3
@@ -218,8 +214,7 @@ X(a, STATIC,   SINGULAR, UINT32,   install_id,        3)
 #define meshtastic_SDNRouteSet_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, FIXED32,  destination,       1) \
 X(a, STATIC,   SINGULAR, FIXED64,  hop_path,          2) \
-X(a, STATIC,   SINGULAR, UINT32,   install_id,        3) \
-X(a, STATIC,   SINGULAR, UINT32,   dest_seq_num,      4)
+X(a, STATIC,   SINGULAR, UINT32,   install_id,        3)
 #define meshtastic_SDNRouteSet_CALLBACK NULL
 #define meshtastic_SDNRouteSet_DEFAULT NULL
 
@@ -270,7 +265,7 @@ extern const pb_msgdesc_t meshtastic_SDN_msg;
 #define meshtastic_SDNRouteCommand_size          11
 #define meshtastic_SDNRouteInstall_size          20
 #define meshtastic_SDNRouteSetConfirm_size       55
-#define meshtastic_SDNRouteSet_size              26
+#define meshtastic_SDNRouteSet_size              20
 #define meshtastic_SDNRouteUpdate_size           33
 #define meshtastic_SDN_size                      65
 
