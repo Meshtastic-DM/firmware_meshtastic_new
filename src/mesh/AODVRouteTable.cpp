@@ -76,11 +76,63 @@ void AODVRouteTable::updateRoute(uint32_t destination, uint8_t nextHop, uint8_t 
         auto &routeList = it->second;
         
         // Check if this is a new sequence number (fresher route)
-        if (!routeList.empty() && destSeqNum > routeList[0].destSeqNum) {
+        if (!routeList.empty() && destSeqNum != 0 && destSeqNum > routeList[0].destSeqNum) {
             // Clear old routes - new seq invalidates all old routes
             LOG_INFO("AODV: New seq %u > old %u, clearing old routes to 0x%x", 
                      destSeqNum, routeList[0].destSeqNum, destination);
             routeList.clear();
+        }
+        
+        // Special handling for SDN-authoritative routes (destSeqNum == 0)
+        if (!routeList.empty() && destSeqNum == 0) {
+            // SDN routes are authoritative - inherit existing seq_num, install as active route with fresh expiry
+            uint32_t inheritedSeqNum = routeList[0].destSeqNum;
+            uint32_t expiry = millis() + AODV_ACTIVE_ROUTE_TIMEOUT;
+            
+            // Check if route via this nextHop already exists
+            auto existingRoute = std::find_if(routeList.begin(), routeList.end(),
+                                             [nextHop](const AODVRouteEntry &r) {
+                                                 return r.nextHop == nextHop;
+                                             });
+            
+            if (existingRoute != routeList.end()) {
+                // Update existing route and move to front (make active)
+                existingRoute->hopCount = hopCount;
+                existingRoute->destSeqNum = inheritedSeqNum;
+                existingRoute->isValid = true;
+                existingRoute->expiryTime = expiry;
+                
+                if (existingRoute != routeList.begin()) {
+                    // Rotate to front
+                    std::rotate(routeList.begin(), existingRoute, existingRoute + 1);
+                    // Update pathIds: front is now 0, rest increment
+                    for (size_t i = 0; i < routeList.size(); i++) {
+                        routeList[i].pathId = i;
+                    }
+                }
+                LOG_INFO("AODV SDN ROUTE UPDATE: dest=0x%x, next_hop=0x%x, hops=%d, seq=%u (inherited), pathId=0 (active)", 
+                         destination, nextHop, hopCount, inheritedSeqNum);
+            } else if (routeList.size() < AODV_MAX_RREQ_PER_ORIGINATOR) {
+                // Insert new route at front (pathId=0, active)
+                routeList.emplace(routeList.begin(), destination, nextHop, hopCount, inheritedSeqNum, expiry, 0);
+                // Update pathIds for displaced routes
+                for (size_t i = 1; i < routeList.size(); i++) {
+                    routeList[i].pathId = i;
+                }
+                LOG_INFO("AODV SDN ROUTE ADD: dest=0x%x, next_hop=0x%x, hops=%d, seq=%u (inherited), pathId=0 (active, total paths=%d)", 
+                         destination, nextHop, hopCount, inheritedSeqNum, (int)routeList.size());
+            } else {
+                // Replace worst route (last one) with SDN route at front
+                routeList.pop_back();
+                routeList.emplace(routeList.begin(), destination, nextHop, hopCount, inheritedSeqNum, expiry, 0);
+                // Update pathIds
+                for (size_t i = 0; i < routeList.size(); i++) {
+                    routeList[i].pathId = i;
+                }
+                LOG_INFO("AODV SDN ROUTE REPLACE: dest=0x%x, next_hop=0x%x, hops=%d, seq=%u (inherited), pathId=0 (active, replaced last route)", 
+                         destination, nextHop, hopCount, inheritedSeqNum);
+            }
+            return;
         }
         
         // Check if we already have a route via this nextHop
