@@ -595,7 +595,6 @@ void SDNModule::handleSDNRouteInstall(const meshtastic_MeshPacket &mp, const mes
     routeSet.destination = install.destination;
     routeSet.hop_path = install.hop_path;
     routeSet.install_id = install.install_id;
-    routeSet.dest_seq_num = 0;  // SDN-authoritative routes use seq_num=0
 
     meshtastic_SDN sdn = meshtastic_SDN_init_default;
     sdn.which_payload_variant = meshtastic_SDN_route_set_tag;
@@ -648,7 +647,7 @@ void SDNModule::handleSDNRouteSet(const meshtastic_MeshPacket &mp, const meshtas
 
         // Install reverse route to start node (mp.from)
         if (prevHop != 0 && mp.from != nodeDB->getNodeNum()) {
-            aodvModule->getRouteTable()->updateRoute(mp.from, prevHop, reverseHopCount + 1, routeSet.dest_seq_num);
+            aodvModule->getRouteTable()->updateRoute(mp.from, prevHop, reverseHopCount + 1, 0);
             LOG_INFO("SDN: Installed reverse route to start=0x%x via prev_hop=0x%x (hops=%u, seq_num=0 authoritative)",
                      mp.from, prevHop, reverseHopCount + 1);
         }
@@ -695,7 +694,7 @@ void SDNModule::handleSDNRouteSet(const meshtastic_MeshPacket &mp, const meshtas
             }
 
             uint8_t remainingHops = hopCount - reverseHopCount - 1;
-            aodvModule->getRouteTable()->updateRoute(routeSet.destination, nextHop, remainingHops, routeSet.dest_seq_num);
+            aodvModule->getRouteTable()->updateRoute(routeSet.destination, nextHop, remainingHops, 0);
             LOG_INFO("SDN: Installed forward route dest=0x%x via next_hop=0x%x (remaining_hops=%u, seq_num=0 authoritative)",
                      routeSet.destination, nextHop, remainingHops);
         }
