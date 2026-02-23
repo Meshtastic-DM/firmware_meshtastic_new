@@ -14,7 +14,7 @@ AODVModule::AODVModule()
 {
     isPromiscuous = true; // Process all AODV packets, not just those addressed to us
     encryptedOk = false;  // AODV packets are encrypted with channel PSK, but we process after decrypt
-    lastCleanupTime = 0;
+    lastRouteTablePrintTime = 0;
 
     // Start the cleanup thread
     setIntervalFromNow(AODV_ROUTE_CLEANUP_INTERVAL);
@@ -32,6 +32,12 @@ bool AODVModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtas
         break;
     case meshtastic_AODV_rerr_tag:
         handleRouteError(mp, aodv->variant.rerr);
+        break;
+    case meshtastic_AODV_rt_request_tag:
+        handleRouteTableRequest(mp, aodv->variant.rt_request);
+        break;
+    case meshtastic_AODV_rt_response_tag:
+        handleRouteTableResponse(mp, aodv->variant.rt_response);
         break;
     default:
         LOG_WARN("AODV: Unknown message variant");
@@ -529,5 +535,114 @@ int32_t AODVModule::runOnce()
     routeTable.cleanup();
     cleanupSeenRREQs();
 
-    return AODV_ROUTE_CLEANUP_INTERVAL; // Run every 5 seconds
+    uint32_t now = millis();
+    if (lastRouteTablePrintTime == 0 || (now - lastRouteTablePrintTime) >= AODV_ROUTE_TABLE_PRINT_INTERVAL) {
+        routeTable.dumpRoutes();
+        lastRouteTablePrintTime = now;
+    }
+
+    return AODV_ROUTE_CLEANUP_INTERVAL; // Run every 60 seconds
+}
+
+void AODVModule::handleRouteTableRequest(const meshtastic_MeshPacket &mp, const meshtastic_RouteTableRequest &rtReq)
+{
+    uint32_t requester = mp.from;
+    if (requester == 0 || requester == NODENUM_BROADCAST) {
+        requester = nodeDB->getNodeNum();
+    }
+
+    LOG_INFO(
+        "AODV: Received route table request "
+        "(request_id=%u from=0x%x to=0x%x relay=0x%x next_hop=0x%x) -> reply_to=0x%x",
+        rtReq.request_id,
+        mp.from,
+        mp.to,
+        mp.relay_node,
+        mp.next_hop,
+        requester
+    );
+
+    // Send route table response with matching request_id
+    sendRouteTableResponse(requester, rtReq.request_id);
+}
+
+void AODVModule::handleRouteTableResponse(const meshtastic_MeshPacket &mp, const meshtastic_RouteTableResponse &rtResp)
+{
+    LOG_INFO("AODV: Received route table response from 0x%x (request_id=%u, routes=%d)",
+             mp.from, rtResp.request_id, rtResp.routes_count);
+
+    // Log each route entry
+    for (size_t i = 0; i < rtResp.routes_count; i++) {
+        const meshtastic_RouteEntry &entry = rtResp.routes[i];
+        LOG_INFO("  Route[%d]: dest=0x%x via=0x%x hops=%u seq=%u lifetime=%us valid=%d",
+                 i, entry.destination, entry.next_hop, entry.hop_count,
+                 entry.destination_seq_num, entry.lifetime, entry.valid);
+    }
+}
+
+void AODVModule::sendRouteTableResponse(uint32_t requester, uint32_t requestId)
+{
+    meshtastic_RouteTableResponse rtResp = meshtastic_RouteTableResponse_init_default;
+
+    // Set request ID to match the request
+    rtResp.request_id = requestId;
+
+    // Get all routes from the route table
+    const auto &allRoutes = routeTable.getAllRoutes();
+    uint32_t now = millis();
+
+    // Populate route entries (up to max 20)
+    rtResp.routes_count = 0;
+    for (const auto &entry : allRoutes) {
+        if (rtResp.routes_count >= 20) {
+            LOG_WARN("AODV: Route table response limited to 20 entries");
+            break;
+        }
+
+        const AODVRouteEntry &route = entry.second;
+        meshtastic_RouteEntry &re = rtResp.routes[rtResp.routes_count];
+        
+        // Populate all fields - include both valid and invalid routes
+        re.destination = route.destination;  // Full 32-bit node number
+        
+        // Convert 8-bit next hop to full 32-bit by reconstructing
+        // In AODV, nextHop is stored as 8-bit last byte, but we need full 32-bit for response
+        // For now, just use the 8-bit value (the Python code will handle this)
+        re.next_hop = route.nextHop;  
+        
+        re.hop_count = route.hopCount;
+        re.destination_seq_num = route.destSeqNum;
+        
+        // Calculate lifetime in seconds
+        if (route.isValid && route.expiryTime > now) {
+            re.lifetime = (route.expiryTime - now) / 1000;
+        } else {
+            re.lifetime = 0;
+        }
+        
+        // Set valid flag
+        re.valid = route.isValid && !route.isExpired();
+
+        rtResp.routes_count++;
+    }
+
+    LOG_INFO("AODV: Sending route table response to 0x%x (request_id=%u, routes=%d)", 
+             requester, requestId, rtResp.routes_count);
+
+    // Create AODV message wrapper
+    meshtastic_AODV aodv = meshtastic_AODV_init_default;
+    aodv.which_variant = meshtastic_AODV_rt_response_tag;
+    aodv.variant.rt_response = rtResp;
+
+    // Allocate and send packet
+    meshtastic_MeshPacket *p = router->allocForSending();
+    p->to = requester;
+    p->decoded.portnum = meshtastic_PortNum_AODV_ROUTING_APP;
+    p->channel = channels.getPrimaryIndex();
+    p->want_ack = false;
+    p->hop_limit = config.lora.hop_limit;
+    p->decoded.payload.size =
+        pb_encode_to_bytes(p->decoded.payload.bytes, sizeof(p->decoded.payload.bytes), &meshtastic_AODV_msg, &aodv);
+
+    router->sendLocal(p);
 }

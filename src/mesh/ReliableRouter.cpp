@@ -97,6 +97,12 @@ bool ReliableRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
  */
 void ReliableRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtastic_Routing *c)
 {
+    // Debug: log incoming packet details early
+    if (p->decoded.portnum == meshtastic_PortNum_ROUTING_APP) {
+        LOG_DEBUG("RX ROUTING pkt: id=0x%x, from=0x%x, to=0x%x, request_id=0x%x, want_ack=%d, c=%p",
+                  p->id, p->from, p->to, p->decoded.request_id, p->want_ack, c);
+    }
+    
     if (isToUs(p)) { // ignore ack/nak/want_ack packets that are not address to us (we only handle 0 hop reliability)
         if (!MeshModule::currentReply) {
             if (p->want_ack) {
@@ -116,6 +122,13 @@ void ReliableRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtas
                         // If it's not an ACK or a reply, send an ACK.
                         uint8_t ackHopLimit = routingModule->getHopLimitForResponse(p->hop_start, p->hop_limit);
                         LOG_INFO("ACK SEND: to=0x%x, for_id=0x%x, want_ack=0, hop_limit=%d (standard ACK)",
+                                 getFrom(p), p->id, ackHopLimit);
+                        sendAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, p->channel, ackHopLimit);
+                    } else if (p->decoded.request_id || p->decoded.reply_id) {
+                        // ACK/NAK packets have request_id set and need ACK-of-ACK responses to stop retransmissions
+                        // For ROUTING_APP packets (ACK/NAK), calculate appropriate hop limit
+                        uint8_t ackHopLimit = routingModule->getHopLimitForResponse(p->hop_start, p->hop_limit);
+                        LOG_INFO("ACK SEND: to=0x%x, for_id=0x%x, hop_limit=%d (ACK-of-ACK for ROUTING_APP)",
                                  getFrom(p), p->id, ackHopLimit);
                         sendAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, p->channel, ackHopLimit);
                     } else if ((p->hop_start > 0 && p->hop_start == p->hop_limit) || p->next_hop != NO_NEXT_HOP_PREFERENCE) {
@@ -140,7 +153,7 @@ void ReliableRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtas
                     sendAckNak(meshtastic_Routing_Error_NO_CHANNEL, getFrom(p), p->id, channels.getPrimaryIndex(),
                                nakHopLimit);
                 }
-            } else if (p->next_hop == nodeDB->getLastByteOfNodeNum(getNodeNum()) && p->hop_limit > 0) {
+            } else if ((p->want_ack || isToUs(p)) && p->next_hop == nodeDB->getLastByteOfNodeNum(getNodeNum()) && p->hop_limit > 0) {
                 // No wantAck, but we need to ACK with hop limit of 0 if we were the next hop to stop their retransmissions
                 LOG_INFO("ACK SEND: to=0x%x, for_id=0x%x, hop_limit=0 (next-hop, want_ack=0)", getFrom(p), p->id);
                 sendAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, p->channel, 0);
@@ -160,6 +173,10 @@ void ReliableRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtas
 
         // A nak is a routing packt that has an error code
         PacketId nakId = (c && c->error_reason != meshtastic_Routing_Error_NONE) ? p->decoded.request_id : 0;
+
+        // Debug: log ACK/NAK detection
+        LOG_DEBUG("ACK detect: c=%p, err=%d, request_id=0x%x, reply_id=0x%x, ackId=0x%x, nakId=0x%x",
+                  c, c ? c->error_reason : -1, p->decoded.request_id, p->decoded.reply_id, ackId, nakId);
 
         // We intentionally don't check wasSeenRecently, because it is harmless to delete non existent retransmission records
         if (ackId || nakId) {
