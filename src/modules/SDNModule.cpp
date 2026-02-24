@@ -95,6 +95,38 @@ static void buildAnnMacMsg(uint32_t controller, uint32_t seq, uint32_t ts,
     memcpy(out + 12, pubkey, 32);
 }
 
+/*
+ * Helper functions for hop path manipulation (fixed64 format)
+ * 8 bytes = 8 one-byte hops, LSB = first hop, zero bytes mark end
+ */
+
+static uint8_t getHopCount(uint64_t hop_path)
+{
+    uint8_t count = 0;
+    for (int i = 0; i < 8; i++) {
+        uint8_t hop = (hop_path >> (i * 8)) & 0xFF;
+        if (hop == 0) break;
+        count++;
+    }
+    return count;
+}
+
+static uint8_t getHop(uint64_t hop_path, uint8_t index)
+{
+    if (index >= 8) return 0;
+    return (hop_path >> (index * 8)) & 0xFF;
+}
+
+static uint64_t packHopPath(const std::vector<uint8_t> &hops)
+{
+    uint64_t packed = 0;
+    size_t count = hops.size() < 8 ? hops.size() : 8;
+    for (size_t i = 0; i < count; i++) {
+        packed |= ((uint64_t)hops[i]) << (i * 8);
+    }
+    return packed;
+}
+
 SDNModule::SDNModule()
     : ProtobufModule("sdn", meshtastic_PortNum_SDN_APP, &meshtastic_SDN_msg),
       concurrency::OSThread("SDNModule"),
@@ -103,13 +135,14 @@ SDNModule::SDNModule()
       sdnControllerNode(0),
       sdnAuthenticated(false),
       lastAnnouncementTime(0),
-      hmacSecretLen(0)
+      hmacSecretLen(0),
+      nextInstallId(0)
 {
     isPromiscuous = true; // Receive all SDN messages
 
     // Test-only configuration until SDN config is added to module/local config protobufs.
     static constexpr uint32_t kTestControllerNode = 0x00000010;
-    static constexpr uint32_t kTestAnnouncementIntervalSec = 60;
+    static constexpr uint32_t kTestAnnouncementIntervalSec = 900;  // 15 minutes
     static constexpr const char *kTestSecret = "meshtastic-sdn-secret";
 
     announcementInterval = kTestAnnouncementIntervalSec;
@@ -140,6 +173,18 @@ bool SDNModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtast
         break;
     case meshtastic_SDN_route_update_tag:
         handleSDNRouteUpdate(mp, sdn->payload_variant.route_update);
+        break;
+    case meshtastic_SDN_route_command_tag:
+        handleSDNRouteCommand(mp, sdn->payload_variant.route_command);
+        break;
+    case meshtastic_SDN_route_install_tag:
+        handleSDNRouteInstall(mp, sdn->payload_variant.route_install);
+        break;
+    case meshtastic_SDN_route_set_tag:
+        handleSDNRouteSet(mp, sdn->payload_variant.route_set);
+        break;
+    case meshtastic_SDN_route_set_confirm_tag:
+        handleSDNRouteSetConfirm(mp, sdn->payload_variant.route_set_confirm);
         break;
     default:
         LOG_WARN("SDN: Unknown message variant");
@@ -241,10 +286,61 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
         nodeDB->updateUser(controllerNode, u, 0);
         LOG_INFO("SDN: Stored controller 0x%x public key in NodeDB", controllerNode);
     }
+    
+    // Install controller's public key as admin key for remote administration
+    installAdminKey();
+}
+
+void SDNModule::installAdminKey()
+{
+    bool needsSave = false;
+    
+    // Enable admin channel if disabled
+    if (!config.security.admin_channel_enabled) {
+        config.security.admin_channel_enabled = true;
+        needsSave = true;
+        LOG_INFO("SDN: Enabled admin channel for remote administration");
+    }
+    
+    // Check if SDN key is already installed in slot 0
+    if (config.security.admin_key[0].size == 32 &&
+        memcmp(config.security.admin_key[0].bytes, sdnPublicKey, 32) == 0) {
+        LOG_DEBUG("SDN: Controller admin key already installed in slot 0");
+        return;
+    }
+    
+    // Install SDN controller public key in admin_key[0] (reserved for SDN)
+    memcpy(config.security.admin_key[0].bytes, sdnPublicKey, 32);
+    config.security.admin_key[0].size = 32;
+    needsSave = true;
+    LOG_INFO("SDN: Installed controller public key in admin_key[0] for remote administration");
+    
+    // Save configuration changes
+    if (needsSave && service) {
+        service->reloadConfig(SEGMENT_CONFIG);
+    }
 }
 
 void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteUpdate &update)
 {
+    // If we are the next hop, add reverse route to reporter node via relay
+    uint8_t ourLastByte = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
+    if (mp.next_hop == ourLastByte) {
+        if (aodvModule && aodvModule->getRouteTable()) {
+            uint8_t relayNode = mp.relay_node;
+            if (relayNode == 0) {
+                relayNode = nodeDB->getLastByteOfNodeNum(mp.from);
+            }
+            
+            // Add route to reporter with relay as next hop
+            uint8_t hopCount = mp.hop_start - mp.hop_limit + 1;
+            aodvModule->getRouteTable()->updateRoute(update.reporter_node, relayNode, hopCount, update.dest_seq_num);
+            
+            LOG_INFO("SDN: Added reverse route to reporter 0x%x via relay 0x%x (hops=%u)",
+                     update.reporter_node, relayNode, hopCount);
+        }
+    }
+
     if (!isSDNController) {
         LOG_DEBUG("SDN: Received route update but not a controller, ignoring");
         return;
@@ -256,6 +352,36 @@ void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const mesh
 
     // TODO: Add auth for route updates too (HMAC/signature) to prevent fake route injection.
     // For now, only announcements are authenticated.
+}
+
+void SDNModule::handleSDNRouteCommand(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteCommand &cmd)
+{
+    // Ignore route commands not addressed to us
+    if (mp.to != nodeDB->getNodeNum()) {
+        LOG_DEBUG("SDN: Ignoring route command not addressed to us (to=0x%x, us=0x%x)",
+                  mp.to, nodeDB->getNodeNum());
+        return;
+    }
+
+    LOG_INFO("SDN: Received route command from 0x%x: dest=0x%x, next_hop=0x%x",
+             mp.from, cmd.destination, cmd.next_hop);
+
+    // Check if AODV module is available
+    if (!aodvModule || !aodvModule->getRouteTable()) {
+        LOG_WARN("SDN: Cannot process route command - AODV module unavailable");
+        return;
+    }
+
+    // Attempt to activate the backup route
+    bool success = aodvModule->getRouteTable()->activateBackupRoute(cmd.destination, (uint8_t)cmd.next_hop);
+    
+    if (success) {
+        LOG_INFO("SDN: Successfully activated backup route for dest=0x%x via next_hop=0x%x",
+                 cmd.destination, cmd.next_hop);
+    } else {
+        LOG_WARN("SDN: Failed to activate backup route for dest=0x%x via next_hop=0x%x",
+                 cmd.destination, cmd.next_hop);
+    }
 }
 
 void SDNModule::sendAnnouncement()
@@ -380,7 +506,7 @@ void SDNModule::sendRouteUpdate(uint32_t destination, uint8_t nextHop, uint8_t h
     p->to = sdnControllerNode;
     p->decoded.portnum = meshtastic_PortNum_SDN_APP;
     p->channel = channels.getPrimaryIndex();
-    p->want_ack = true;
+    p->want_ack = false;
     p->hop_limit = config.lora.hop_limit;
 
     p->decoded.payload.size = pb_encode_to_bytes(
@@ -392,6 +518,258 @@ void SDNModule::sendRouteUpdate(uint32_t destination, uint8_t nextHop, uint8_t h
 
     LOG_INFO("SDN: Sending route update for dest=0x%x (next_hop=0x%x, hops=%u) to controller 0x%x",
              destination, nextHop, hopCount, sdnControllerNode);
+    router->sendLocal(p);
+}
+
+void SDNModule::sendRouteCommand(uint32_t targetNode, uint32_t destination, uint8_t nextHop)
+{
+    if (targetNode == 0) {
+        LOG_WARN("SDN: Invalid target node for route command");
+        return;
+    }
+
+    meshtastic_SDNRouteCommand cmd = meshtastic_SDNRouteCommand_init_default;
+
+    cmd.destination = destination;
+    cmd.next_hop = nextHop;
+
+    meshtastic_SDN sdn = meshtastic_SDN_init_default;
+    sdn.which_payload_variant = meshtastic_SDN_route_command_tag;
+    sdn.payload_variant.route_command = cmd;
+
+    meshtastic_MeshPacket *p = router->allocForSending();
+    p->to = targetNode;
+    p->decoded.portnum = meshtastic_PortNum_SDN_APP;
+    p->channel = channels.getPrimaryIndex();
+    p->want_ack = false;
+    p->hop_limit = config.lora.hop_limit;
+
+    p->decoded.payload.size = pb_encode_to_bytes(
+        p->decoded.payload.bytes,
+        sizeof(p->decoded.payload.bytes),
+        &meshtastic_SDN_msg,
+        &sdn
+    );
+
+    LOG_INFO("SDN: Sending route command to node 0x%x: activate dest=0x%x via next_hop=0x%x",
+             targetNode, destination, nextHop);
+    router->sendLocal(p);
+}
+
+void SDNModule::handleSDNRouteInstall(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteInstall &install)
+{
+    // Verify message is addressed to us
+    if (mp.to != nodeDB->getNodeNum()) {
+        LOG_DEBUG("SDN: RouteInstall not addressed to us (to=0x%x, us=0x%x)", mp.to, nodeDB->getNodeNum());
+        return;
+    }
+
+    uint8_t hopCount = getHopCount(install.hop_path);
+    if (hopCount == 0 || hopCount > 8) {
+        LOG_WARN("SDN: Invalid hop count %u in RouteInstall", hopCount);
+        return;
+    }
+
+    uint8_t firstHop = getHop(install.hop_path, 0);
+    if (firstHop == 0) {
+        LOG_WARN("SDN: Invalid first hop in RouteInstall");
+        return;
+    }
+
+    LOG_INFO("SDN: RouteInstall received for dest=0x%x, install_id=%u, hops=%u",
+             install.destination, (uint8_t)install.install_id, hopCount);
+
+    // Check AODV module availability
+    if (!aodvModule || !aodvModule->getRouteTable()) {
+        LOG_WARN("SDN: Cannot process RouteInstall - AODV module unavailable");
+        return;
+    }
+
+    // Install forward route to destination via first hop with seq_num=0 (SDN-authoritative)
+    aodvModule->getRouteTable()->updateRoute(install.destination, firstHop, hopCount, 0);
+    LOG_INFO("SDN: Installed forward route dest=0x%x via next_hop=0x%x (hops=%u, seq_num=0 authoritative)",
+             install.destination, firstHop, hopCount);
+
+    // Create RouteSet message to cascade through the path
+    meshtastic_SDNRouteSet routeSet = meshtastic_SDNRouteSet_init_default;
+    routeSet.destination = install.destination;
+    routeSet.hop_path = install.hop_path;
+    routeSet.install_id = install.install_id;
+
+    meshtastic_SDN sdn = meshtastic_SDN_init_default;
+    sdn.which_payload_variant = meshtastic_SDN_route_set_tag;
+    sdn.payload_variant.route_set = routeSet;
+
+    meshtastic_MeshPacket *p = router->allocForSending();
+    p->to = install.destination;
+    p->decoded.portnum = meshtastic_PortNum_SDN_APP;
+    p->channel = channels.getPrimaryIndex();
+    p->want_ack = false;
+    p->hop_limit = config.lora.hop_limit;
+    p->hop_start = hopCount;
+
+    p->decoded.payload.size = pb_encode_to_bytes(
+        p->decoded.payload.bytes,
+        sizeof(p->decoded.payload.bytes),
+        &meshtastic_SDN_msg,
+        &sdn
+    );
+
+    LOG_INFO("SDN: Sending RouteSet to dest=0x%x via first hop 0x%x (seq_num=0 authoritative)",
+             install.destination, firstHop);
+    router->sendLocal(p);
+}
+
+void SDNModule::handleSDNRouteSet(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteSet &routeSet)
+{
+    uint8_t hopCount = getHopCount(routeSet.hop_path);
+    if (hopCount == 0) {
+        LOG_WARN("SDN: Empty hop_path in RouteSet");
+        return;
+    }
+    uint8_t reverseHopCount = mp.hop_start - mp.hop_limit;
+    uint8_t myLastByte = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
+    uint8_t currentHop = getHop(routeSet.hop_path, reverseHopCount);
+
+    // Check AODV module availability
+    if (!aodvModule || !aodvModule->getRouteTable()) {
+        LOG_WARN("SDN: Cannot process RouteSet - AODV module unavailable");
+        return;
+    }
+
+    // If we're in the path or the destination, process the RouteSet
+    if (currentHop == myLastByte || mp.to == nodeDB->getNodeNum()) {
+        // Extract previous hop for reverse route
+        uint8_t prevHop = mp.relay_node;
+        if (prevHop == 0 && mp.from != nodeDB->getNodeNum()) {
+            prevHop = nodeDB->getLastByteOfNodeNum(mp.from);
+        }
+
+        // Install reverse route to start node (mp.from)
+        if (prevHop != 0 && mp.from != nodeDB->getNodeNum()) {
+            aodvModule->getRouteTable()->updateRoute(mp.from, prevHop, reverseHopCount + 1, 0);
+            LOG_INFO("SDN: Installed reverse route to start=0x%x via prev_hop=0x%x (hops=%u, seq_num=0 authoritative)",
+                     mp.from, prevHop, reverseHopCount + 1);
+        }
+
+        // Check if we are the final destination
+        if (mp.to == nodeDB->getNodeNum()) {
+            LOG_INFO("SDN: RouteSet reached final destination (install_id=%u)", (uint8_t)routeSet.install_id);
+            
+            // Send confirmation back to controller
+            if (sdnControllerNode != 0) {
+                meshtastic_SDNRouteSetConfirm confirm = meshtastic_SDNRouteSetConfirm_init_default;
+                confirm.destination = routeSet.destination;
+                confirm.install_id = routeSet.install_id;
+                confirm.success = true;
+
+                meshtastic_SDN sdn = meshtastic_SDN_init_default;
+                sdn.which_payload_variant = meshtastic_SDN_route_set_confirm_tag;
+                sdn.payload_variant.route_set_confirm = confirm;
+
+                meshtastic_MeshPacket *p = router->allocForSending();
+                p->to = sdnControllerNode;
+                p->decoded.portnum = meshtastic_PortNum_SDN_APP;
+                p->channel = channels.getPrimaryIndex();
+                p->want_ack = false;
+                p->hop_limit = config.lora.hop_limit;
+
+                p->decoded.payload.size = pb_encode_to_bytes(
+                    p->decoded.payload.bytes,
+                    sizeof(p->decoded.payload.bytes),
+                    &meshtastic_SDN_msg,
+                    &sdn
+                );
+
+                LOG_INFO("SDN: Sending RouteSetConfirm to controller 0x%x (install_id=%u)",
+                         sdnControllerNode, (uint8_t)routeSet.install_id);
+                router->sendLocal(p);
+            }
+            return;
+        } else {
+            uint8_t nextHop = getHop(routeSet.hop_path, reverseHopCount + 1);
+            if (nextHop == 0) {
+                LOG_WARN("SDN: Invalid next hop at position %u in path", reverseHopCount + 1);
+                return;
+            }
+
+            uint8_t remainingHops = hopCount - reverseHopCount - 1;
+            aodvModule->getRouteTable()->updateRoute(routeSet.destination, nextHop, remainingHops, 0);
+            LOG_INFO("SDN: Installed forward route dest=0x%x via next_hop=0x%x (remaining_hops=%u, seq_num=0 authoritative)",
+                     routeSet.destination, nextHop, remainingHops);
+        }
+    } else {
+        LOG_DEBUG("SDN: Not in path at position %u (expected=0x%x, me=0x%x), ignoring RouteSet",
+                 reverseHopCount, currentHop, myLastByte);
+    }
+}
+
+void SDNModule::handleSDNRouteSetConfirm(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteSetConfirm &confirm)
+{
+    // Only controller should receive confirmations
+    if (!isSDNController) {
+        LOG_DEBUG("SDN: RouteSetConfirm received but not controller, ignoring");
+        return;
+    }
+
+    if (confirm.success) {
+        LOG_INFO("SDN: RouteSet installation SUCCESS for dest=0x%x (install_id=%u)",
+                 confirm.destination, (uint8_t)confirm.install_id);
+    } else {
+        LOG_WARN("SDN: RouteSet installation FAILED for dest=0x%x (install_id=%u): %s",
+                 confirm.destination, (uint8_t)confirm.install_id,
+                 confirm.error_msg[0] != '\0' ? confirm.error_msg : "Unknown error");
+    }
+}
+
+void SDNModule::sendRouteInstall(uint32_t destination, const std::vector<uint8_t> &hopPath)
+{
+    if (!isSDNController) {
+        LOG_WARN("SDN: Only controller can send RouteInstall");
+        return;
+    }
+
+    if (hopPath.empty() || hopPath.size() > 8) {
+        LOG_WARN("SDN: Invalid hop path size %zu (must be 1-8)", hopPath.size());
+        return;
+    }
+
+    // Increment installation ID (auto-wraps at 255)
+    nextInstallId++;
+
+    uint64_t packedPath = packHopPath(hopPath);
+
+    meshtastic_SDNRouteInstall install = meshtastic_SDNRouteInstall_init_default;
+    install.destination = destination;
+    install.hop_path = packedPath;
+    install.install_id = nextInstallId;
+
+    meshtastic_SDN sdn = meshtastic_SDN_init_default;
+    sdn.which_payload_variant = meshtastic_SDN_route_install_tag;
+    sdn.payload_variant.route_install = install;
+
+    meshtastic_MeshPacket *p = router->allocForSending();
+    p->to = nodeDB->getNodeNum() | (hopPath[0] << 0);  // Send to start node (first hop)
+    
+    // Reconstruct full node ID from last byte (assuming same subnet as controller)
+    // This is a simplified approach - in production, controller should maintain full node ID mapping
+    uint32_t startNodeId = (nodeDB->getNodeNum() & 0xFFFFFF00) | hopPath[0];
+    p->to = startNodeId;
+    
+    p->decoded.portnum = meshtastic_PortNum_SDN_APP;
+    p->channel = channels.getPrimaryIndex();
+    p->want_ack = false;
+    p->hop_limit = config.lora.hop_limit;
+
+    p->decoded.payload.size = pb_encode_to_bytes(
+        p->decoded.payload.bytes,
+        sizeof(p->decoded.payload.bytes),
+        &meshtastic_SDN_msg,
+        &sdn
+    );
+
+    LOG_INFO("SDN: Sending RouteInstall to start_node=0x%x for dest=0x%x (install_id=%u, hops=%zu)",
+             p->to, destination, nextInstallId, hopPath.size());
     router->sendLocal(p);
 }
 

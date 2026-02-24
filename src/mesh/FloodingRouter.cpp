@@ -4,6 +4,7 @@
 #include "configuration.h"
 #include "mesh-pb-constants.h"
 #include "meshUtils.h"
+#include "generated/meshtastic/aodv.pb.h"
 #if !MESHTASTIC_EXCLUDE_TRACEROUTE
 #include "modules/TraceRouteModule.h"
 #endif
@@ -36,6 +37,26 @@ bool FloodingRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
     }
 
     if (seenRecently) {
+        // Special case: Allow AODV RREQ packets destined to us through even if duplicate
+        // This allows the target node to receive and respond to RREQs
+        // AODV module maintains its own RREQ duplicate detection via seenRREQs
+        if ((p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) &&
+            (p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP) &&
+            isBroadcast(p->to)) {
+            
+            // Decode AODV message to check if it's an RREQ for us
+            meshtastic_AODV aodv = meshtastic_AODV_init_default;
+            if (pb_decode_from_bytes(p->decoded.payload.bytes, p->decoded.payload.size, 
+                                    &meshtastic_AODV_msg, &aodv)) {
+                // Check if this is an RREQ destined to us
+                if (aodv.which_variant == meshtastic_AODV_rreq_tag && 
+                    aodv.variant.rreq.destination == nodeDB->getNodeNum()) {
+                    LOG_DEBUG("AODV RREQ for us (0x%x) - bypassing duplicate filter", nodeDB->getNodeNum());
+                    return Router::shouldFilterReceived(p); // Skip FloodingRouter's duplicate filtering
+                }
+            }
+        }
+        
         printPacket("Ignore dupe incoming msg", p);
         rxDupe++;
 
@@ -118,8 +139,11 @@ void FloodingRouter::perhapsCancelDupe(const meshtastic_MeshPacket *p)
     if (p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA && roleAllowsCancelingDupe(p)) {
         // cancel rebroadcast of this message *if* there was already one, unless we're a router!
         // But only LoRa packets should be able to trigger this.
-        if (Router::cancelSending(p->from, p->id))
+        if (Router::cancelSending(p->from, p->id)) {
+            LOG_DEBUG("Implicit ACK: heard rebroadcast from=0x%x, id=0x%x, to=0x%x, canceled our relay",
+                      p->from, p->id, p->to);
             txRelayCanceled++;
+        }
     }
     if (config.device.role == meshtastic_Config_DeviceConfig_Role_ROUTER_LATE && iface) {
         iface->clampToLateRebroadcastWindow(getFrom(p), p->id);
@@ -138,7 +162,8 @@ void FloodingRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtas
                         (p->decoded.request_id != 0 || p->decoded.reply_id != 0);
     if (isAckorReply && !isToUs(p) && !isBroadcast(p->to)) {
         // do not flood direct message that is ACKed or replied to
-        LOG_DEBUG("Rxd an ACK/reply not for me, cancel rebroadcast");
+        LOG_DEBUG("ACK/Reply overhear: from=0x%x, to=0x%x, request_id=0x%x, canceling DM rebroadcast",
+                  p->from, p->to, p->decoded.request_id);
         Router::cancelSending(p->to, p->decoded.request_id); // cancel rebroadcast for this DM
     }
 

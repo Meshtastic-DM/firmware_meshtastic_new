@@ -4,6 +4,7 @@
 #include "NodeDB.h"
 #include "PowerFSM.h"
 #include "RTC.h"
+#include "SDNModule.h"
 #include "SPILock.h"
 #include "input/InputBroker.h"
 #include "meshUtils.h"
@@ -823,9 +824,33 @@ void AdminModule::handleSetConfig(const meshtastic_Config &c)
         config.has_bluetooth = true;
         config.bluetooth = c.payload_variant.bluetooth;
         break;
-    case meshtastic_Config_security_tag:
+    case meshtastic_Config_security_tag: {
         LOG_INFO("Set config: Security");
+        
+        // Protect SDN controller's admin key from removal if authenticated
+        uint8_t sdnKeyBackup[32];
+        bool hasSdnKey = false;
+        if (sdnModule && sdnModule->isControllerAuthenticated()) {
+            const uint8_t *sdnKey = sdnModule->getControllerPublicKey();
+            memcpy(sdnKeyBackup, sdnKey, 32);
+            hasSdnKey = true;
+            
+            // Check if incoming config would remove/change SDN key in slot 0
+            if (c.payload_variant.security.admin_key[0].size != 32 ||
+                memcmp(c.payload_variant.security.admin_key[0].bytes, sdnKey, 32) != 0) {
+                const char *warning = "Cannot remove SDN controller admin key while authenticated";
+                LOG_WARN("%s", warning);
+                sendWarning(warning);
+            }
+        }
+        
         config.security = c.payload_variant.security;
+        
+        // Restore SDN key after assignment if it was authenticated
+        if (hasSdnKey) {
+            memcpy(config.security.admin_key[0].bytes, sdnKeyBackup, 32);
+            config.security.admin_key[0].size = 32;
+        }
 #if !(MESHTASTIC_EXCLUDE_PKI_KEYGEN) && !(MESHTASTIC_EXCLUDE_PKI)
         // If the client set the key to blank, go ahead and regenerate so long as we're not in ham mode
         if (!owner.is_licensed && config.lora.region != meshtastic_Config_LoRaConfig_RegionCode_UNSET) {
@@ -857,6 +882,7 @@ void AdminModule::handleSetConfig(const meshtastic_Config &c)
             requiresReboot = false;
 
         break;
+    }
     case meshtastic_Config_device_ui_tag:
         // NOOP! This is handled by handleStoreDeviceUIConfig
         break;

@@ -5,6 +5,7 @@
 #include "concurrency/OSThread.h"
 #include "mesh/generated/meshtastic/aodv.pb.h"
 #include <map>
+#include <tuple>
 
 /*
  * AODVModule - Handles AODV routing protocol messages
@@ -15,18 +16,21 @@ class AODVModule : public ProtobufModule<meshtastic_AODV>, public concurrency::O
   private:
     AODVRouteTable routeTable;
     
-    // Track seen RREQs to prevent processing duplicates: (originator, rreq_id) -> timestamp
-    std::map<std::pair<uint32_t, uint32_t>, uint32_t> seenRREQs;
+    // Track seen RREQs at target node to prevent processing duplicates and enforce per-originator limit
+    // Outer Key: originator node number
+    // Inner Key: dest_seq_num
+    // Value: pair of (response_seq_num, vector of (relay_node, timestamp) pairs - max 3 relay paths per dest_seq_num)
+    std::map<uint32_t, std::map<uint32_t, std::pair<uint32_t, std::vector<std::pair<uint8_t, uint32_t>>>>> seenRREQs;
     
     // Cleanup interval for route table maintenance
     uint32_t lastRouteTablePrintTime;
 
     // RREQ Processing
     void handleRouteRequest(const meshtastic_MeshPacket &mp, const meshtastic_RouteRequest &rreq);
-    bool hasSeenRREQ(uint32_t originator, uint32_t rreqId);
-    void markRREQAsSeen(uint32_t originator, uint32_t rreqId);
+    bool hasSeenRREQ(uint32_t originator, uint32_t destSeqNum, uint8_t relayNode);
+    uint32_t markRREQAsSeen(uint32_t originator, uint32_t destSeqNum, uint8_t relayNode);
     void forwardRREQ(const meshtastic_MeshPacket &receivedPacket, const meshtastic_RouteRequest &rreq);
-    void sendRREP(uint32_t originator, uint32_t destination, uint32_t destSeqNum, uint8_t hopCount);
+    void sendRREP(uint32_t originator, uint32_t destination, uint32_t destSeqNum, uint8_t hopCount, uint8_t nextHop);
 
     // RREP Processing
     void handleRouteReply(const meshtastic_MeshPacket &mp, const meshtastic_RouteReply &rrep);

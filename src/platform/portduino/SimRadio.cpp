@@ -252,6 +252,16 @@ void SimRadio::startSend(meshtastic_MeshPacket *txp)
 
 
     // Now wrap into SIMULATOR_APP payload
+    // Preserve important fields before zeroing decoded structure
+    uint32_t saved_request_id = p->decoded.request_id;
+    bool saved_want_response = p->decoded.want_response;
+    uint32_t saved_dest = p->decoded.dest;
+    uint32_t saved_source = p->decoded.source;
+    uint32_t saved_reply_id = p->decoded.reply_id;
+    uint32_t saved_emoji = p->decoded.emoji;
+    bool saved_has_bitfield = p->decoded.has_bitfield;
+    uint8_t saved_bitfield = p->decoded.bitfield;
+
     // Ensure decoded union is valid before writing into it
     p->which_payload_variant = meshtastic_MeshPacket_decoded_tag;
     memset(&p->decoded, 0, sizeof(p->decoded));
@@ -261,6 +271,16 @@ void SimRadio::startSend(meshtastic_MeshPacket *txp)
                            &meshtastic_Compressed_msg, &c);
 
     p->decoded.portnum = meshtastic_PortNum_SIMULATOR_APP;
+
+    // Restore preserved fields
+    p->decoded.request_id = saved_request_id;
+    p->decoded.want_response = saved_want_response;
+    p->decoded.dest = saved_dest;
+    p->decoded.source = saved_source;
+    p->decoded.reply_id = saved_reply_id;
+    p->decoded.emoji = saved_emoji;
+    p->decoded.has_bitfield = saved_has_bitfield;
+    p->decoded.bitfield = saved_bitfield;
 
     service->sendQueueStatusToPhone(router->getQueueStatus(), 0, p->id);
     service->sendToPhone(p);

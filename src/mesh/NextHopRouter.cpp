@@ -24,7 +24,21 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
     p->relay_node = nodeDB->getLastByteOfNodeNum(getNodeNum()); // First set the relayer to us
     wasSeenRecently(p);                                         // FIXME, move this to a sniffSent method
 
-    p->next_hop = getNextHop(p->to, p->relay_node); // set the next hop
+    // Check if packet is decoded and what type of control traffic it is
+    bool isDecoded = (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag);
+    bool isAodvControl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP);
+    bool isSdnControl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_SDN_APP);
+    bool isRoutingCtrl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_ROUTING_APP);
+
+    // Check if this is an AODV control packet from us with explicit next_hop set
+    if (isAodvControl && isFromUs(p) && p->next_hop != NO_NEXT_HOP_PREFERENCE) {
+        // Preserve the next_hop set by AODVModule (for RREP routing)
+        LOG_DEBUG("Preserving AODV control next hop for dest 0x%x to 0x%x", p->to, p->next_hop);
+    } else {
+        // Calculate next_hop using route table or default behavior
+        p->next_hop = getNextHop(p->to, p->relay_node);
+        LOG_DEBUG("Setting next hop for packet with dest %x to %x", p->to, p->next_hop);
+    }
     
     // Log data packet routing
     if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
@@ -42,14 +56,6 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
             }
         }
     }
-    
-    LOG_DEBUG("Setting next hop for packet with dest %x to %x", p->to, p->next_hop);
-
-    // Check if packet is decoded and what type of control traffic it is
-    bool isDecoded = (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag);
-    bool isAodvControl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP);
-    bool isSdnControl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_SDN_APP);
-    bool isRoutingCtrl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_ROUTING_APP);
 
     // If no route exists and we're sending from local node, trigger AODV route discovery
     // But never trigger discovery for AODV control packets, SDN control packets, or routing protocol packets
@@ -131,6 +137,8 @@ void NextHopRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtast
         // ACK-based route learning has been REMOVED - AODV manages routes dynamically
         // Just handle ACK cancellation for rebroadcast and stop retransmissions
         if (!isToUs(p)) {
+            LOG_DEBUG("ACK/Reply overhear: from=0x%x, to=0x%x, request_id=0x%x, canceling rebroadcast",
+                      p->from, p->to, p->decoded.request_id);
             Router::cancelSending(p->to, p->decoded.request_id); // cancel rebroadcast for this DM
             // stop retransmission for the original packet
             stopRetransmission(p->to, p->decoded.request_id); // for original packet, from = to and id = request_id
@@ -304,6 +312,8 @@ bool NextHopRouter::stopRetransmission(GlobalPacketId key)
             // We only cancel it if we are the original sender or if we're not a router(_late)
             if (isFromUs(p) || roleAllowsCancelingFromTxQueue(p)) {
                 // remove the 'original' (identified by originator and packet->id) from the txqueue and free it
+                LOG_DEBUG("stopRetransmission: canceling txQueue for from=0x%x, id=0x%x, to=0x%x, retries_left=%d",
+                          getFrom(p), p->id, p->to, old->numRetransmissions);
                 cancelSending(getFrom(p), p->id);
             }
         }

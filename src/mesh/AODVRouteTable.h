@@ -13,6 +13,7 @@
 #define AODV_RREQ_RATE_LIMIT 1000            // Minimum 1s between RREQs for same destination
 #define AODV_NET_TRAVERSAL_TIME 10000         // 10s - estimated time to traverse network
 #define AODV_MAX_PENDING_PACKETS_PER_DEST 5  // Buffer limit per destination
+#define AODV_MAX_RREQ_PER_ORIGINATOR 3        // Maximum RREQs to process per originator at destination
 #define AODV_ROUTE_CLEANUP_INTERVAL 60000     // 60s - periodic route table cleanup
 #define AODV_ROUTE_TABLE_PRINT_INTERVAL 60000 // 60s - periodic route table dump to serial logs
 
@@ -26,17 +27,18 @@ struct AODVRouteEntry {
     uint32_t destSeqNum;        // Destination sequence number
     uint32_t expiryTime;        // Timestamp when route expires (millis())
     bool isValid;               // Route validity flag
-    uint32_t precursor; // Single node that uses this route (for RERR)
+    uint32_t precursor;         // Single node that uses this route (for RERR)
+    uint8_t pathId;             // Path identifier: 0=primary, 1=backup1, 2=backup2
 
     AODVRouteEntry()
         : destination(0), nextHop(0), hopCount(255), destSeqNum(0), expiryTime(0), isValid(false),
-          precursor(NODENUM_BROADCAST)
+          precursor(NODENUM_BROADCAST), pathId(0)
     {
     }
 
-    AODVRouteEntry(uint32_t dest, uint8_t next, uint8_t hops, uint32_t seqNum, uint32_t expiry)
+    AODVRouteEntry(uint32_t dest, uint8_t next, uint8_t hops, uint32_t seqNum, uint32_t expiry, uint8_t path = 0)
         : destination(dest), nextHop(next), hopCount(hops), destSeqNum(seqNum), expiryTime(expiry), isValid(true),
-          precursor(NODENUM_BROADCAST)
+          precursor(NODENUM_BROADCAST), pathId(path)
     {
     }
 
@@ -87,10 +89,10 @@ struct BufferedPacket {
 class AODVRouteTable
 {
   private:
-    std::map<uint32_t, AODVRouteEntry> routes;        // destination -> route entry
-    std::map<uint32_t, PendingRREQ> pendingRREQs;     // destination -> pending RREQ
+    std::map<uint32_t, std::vector<AODVRouteEntry>> routes;  // destination -> vector of route entries (up to 3)
+    std::map<uint32_t, PendingRREQ> pendingRREQs;            // destination -> pending RREQ
     std::map<uint32_t, std::vector<BufferedPacket>> packetBuffer; // destination -> buffered packets
-    std::map<uint32_t, uint32_t> rreqRateLimit;       // destination -> last RREQ time
+    std::map<uint32_t, uint32_t> rreqRateLimit;              // destination -> last RREQ time
 
     uint32_t mySeqNum;  // Our own sequence number
     uint32_t nextRREQId; // Counter for RREQ IDs
@@ -99,14 +101,18 @@ class AODVRouteTable
     AODVRouteTable();
 
     // Route lookup and management
-    AODVRouteEntry *findRoute(uint32_t destination);
+    AODVRouteEntry *findRoute(uint32_t destination);  // Returns primary route only
+    std::vector<AODVRouteEntry> *getAllRoutes(uint32_t destination); // Returns all routes for destination
     bool hasValidRoute(uint32_t destination);
     void addRoute(uint32_t destination, uint8_t nextHop, uint8_t hopCount, uint32_t destSeqNum);
     void updateRoute(uint32_t destination, uint8_t nextHop, uint8_t hopCount, uint32_t destSeqNum);
-    void invalidateRoute(uint32_t destination);
+    void invalidateRoute(uint32_t destination);  // Invalidates all paths
+    void invalidateRoutePath(uint32_t destination, uint8_t nextHop); // Invalidates specific path
     void refreshRouteOnUse(uint32_t destination);  // Extend route expiry when actively used
     void removeExpiredRoutes();
     void addPrecursor(uint32_t destination, uint32_t precursorNode);
+    size_t getRoutePathCount(uint32_t destination) const; // Returns number of paths for destination
+    bool activateBackupRoute(uint32_t destination, uint8_t nextHop); // Activate backup route as primary
 
     // Sequence number management
     uint32_t getMySeqNum() { return mySeqNum; }
