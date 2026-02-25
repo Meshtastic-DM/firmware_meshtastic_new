@@ -24,6 +24,9 @@ PB_BIND(meshtastic_SDNRouteSet, meshtastic_SDNRouteSet, AUTO)
 PB_BIND(meshtastic_SDNRouteSetConfirm, meshtastic_SDNRouteSetConfirm, AUTO)
 
 
+PB_BIND(meshtastic_SDNLinkQuality, meshtastic_SDNLinkQuality, AUTO)
+
+
 PB_BIND(meshtastic_SDN, meshtastic_SDN, AUTO)
 
 
