@@ -45,8 +45,8 @@ message SDNRouteUpdate {
     uint32 next_hop = 2;         // Next hop node (8-bit last byte)
     uint32 hop_count = 3;        // Number of hops to destination
     uint32 dest_seq_num = 4;     // AODV destination sequence number
-    fixed32 reporter_node = 5;   // Node reporting this route (this node's ID)
-    fixed32 timestamp = 6;       // Unix timestamp when route was learned
+    fixed32 timestamp = 5;       // Unix timestamp when route was learned
+                                 // Reporter node ID available in MeshPacket.from
 }
 ```
 
@@ -234,8 +234,8 @@ Mesh Node A (0xAAAAAAAA)
             - next_hop: 0xNN
             - hop_count: H
             - dest_seq_num: S
-            - reporter_node: 0xAAAAAAAA
             - timestamp: Current Unix time
+            (reporter_node from MeshPacket.from)
         |
         +-- Send unicast to sdnControllerNode (with ACK)
     |
