@@ -7,6 +7,27 @@
 #include <map>
 
 /**
+ * Per-relay reception statistics for PDR calculation
+ */
+struct NeighborLinkStats {
+    uint8_t relayNode;        // Last byte of relay node ID
+    uint32_t rxGood;          // Successful receptions from this relay
+    uint32_t rxBad;           // Failed receptions from this relay
+    uint32_t lastReportTime;  // millis() when last reported
+    
+    NeighborLinkStats() : relayNode(0), rxGood(0), rxBad(0), lastReportTime(0) {}
+    
+    float getPDR() const {
+        uint32_t total = rxGood + rxBad;
+        return total > 0 ? (float)rxGood / total : 0.0f;
+    }
+    
+    uint32_t getTotalPackets() const {
+        return rxGood + rxBad;
+    }
+};
+
+/**
  * SDN (Software Defined Networking) Module
  * 
  * Allows a controller node to:
@@ -35,6 +56,12 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
     
     // Route installation tracking
     uint8_t nextInstallId;             // Next installation ID (0-255, auto-wraps)
+    
+    // Per-relay link quality tracking
+    std::map<uint8_t, NeighborLinkStats> neighborStats;
+    uint32_t linkQualityReportInterval;   // Seconds between reports (default 300)
+    uint32_t lastLinkQualityReport;       // millis() of last report
+    uint32_t minRelayNodesForReporting;   // Min relay nodes to trigger reporting (default 2)
     
   public:
     SDNModule();
@@ -75,6 +102,11 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
     void handleSDNRouteSetConfirm(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteSetConfirm &confirm);
     
     /**
+     * Handle link quality metrics from nodes
+     */
+    void handleSDNLinkQuality(const meshtastic_MeshPacket &mp, const meshtastic_SDNLinkQuality &lq);
+    
+    /**
      * Send announcement broadcast (controller only)
      */
     void sendAnnouncement();
@@ -96,6 +128,22 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
      * @param hopPath Vector of 1-byte node IDs (max 8 hops)
      */
     void sendRouteInstall(uint32_t destination, const std::vector<uint8_t> &hopPath);
+    
+    /**
+     * Record packet reception from relay node (called from RadioLibInterface)
+     */
+    void recordReception(uint8_t relayNode, bool success);
+    
+    /**
+     * Send link quality reports to SDN controller
+     * Only sends if node has 2+ active relay nodes (routing participant)
+     */
+    void sendLinkQualityReports();
+    
+    /**
+     * Get count of unique relay nodes seen
+     */
+    size_t getActiveRelayCount() const { return neighborStats.size(); }
     
     /**
      * Check if SDN controller is authenticated
