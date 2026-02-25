@@ -1,6 +1,7 @@
 #include "SimRadio.h"
 #include "MeshService.h"
 #include "Router.h"
+#include "modules/SDNModule.h"
 
 SimRadio::SimRadio() : NotifiedWorkerThread("SimRadio")
 {
@@ -348,6 +349,12 @@ void SimRadio::startReceive(meshtastic_MeshPacket *p)
     if (isActivelyReceiving()) {
         LOG_WARN("Collision detected, dropping current and previous packet!");
         rxBad++;
+
+        // Track failed RX for SDN
+        if (sdnModule && receivingPacket && receivingPacket->relay_node != 0 && receivingPacket->relay_node != NO_RELAY_NODE) {
+            sdnModule->recordReception(receivingPacket->relay_node, false);
+        }
+
         airTime->logAirtime(RX_ALL_LOG, getPacketTime(receivingPacket, true));
         packetPool.release(receivingPacket);
         receivingPacket = nullptr;
@@ -402,6 +409,12 @@ void SimRadio::handleReceiveInterrupt()
     rxGood++;
 
     meshtastic_MeshPacket *mp = packetPool.allocCopy(*receivingPacket); // keep a copy in packetPool
+
+    // Track per-relay PDR for SDN
+    if (sdnModule && mp->relay_node != 0 && mp->relay_node != NO_RELAY_NODE) {
+        sdnModule->recordReception(mp->relay_node, true);
+    }
+
     packetPool.release(receivingPacket);                                // release the original
     receivingPacket = nullptr;
 
