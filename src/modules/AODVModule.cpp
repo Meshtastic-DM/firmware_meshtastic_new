@@ -25,8 +25,7 @@ bool AODVModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtas
     // Process based on message type
     switch (aodv->which_variant) {
     case meshtastic_AODV_rreq_tag:
-        handleRouteRequest(mp, aodv->variant.rreq);
-        break;
+        return handleRouteRequest(mp, aodv->variant.rreq);
     case meshtastic_AODV_rrep_tag:
         handleRouteReply(mp, aodv->variant.rrep);
         break;
@@ -38,10 +37,10 @@ bool AODVModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtas
         break;
     }
 
-    return false; // Always allow other modules to see AODV packets
+    return false; // Allow other modules to see RREP/RERR packets
 }
 
-void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const meshtastic_RouteRequest &rreq)
+bool AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const meshtastic_RouteRequest &rreq)
 {
     uint8_t hopCount = mp.hop_start - mp.hop_limit;
     
@@ -62,7 +61,7 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
     // Ignore RREQs from ourselves
     if (rreq.originator == nodeDB->getNodeNum()) {
         LOG_DEBUG("AODV: Ignoring our own RREQ");
-        return;
+        return false;
     }
 
     // Update reverse route to originator (for RREP to travel back)
@@ -77,7 +76,7 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
         // Check if we've already seen this RREQ from this relay path
         if (hasSeenRREQ(rreq.originator, rreq.dest_seq_num, prevHop)) {
             LOG_DEBUG("AODV: Duplicate RREQ from same path, ignoring");
-            return;
+            return true; // Consume duplicate to prevent rebroadcast
         }
         
         // Mark as seen and get response seq num (increments only on first, reuses for alternate paths)
@@ -88,10 +87,9 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
         LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=0, next_hop=0x%x", 
                  rreq.originator, rreq.destination, mySeqNum, prevHop);
         sendRREP(rreq.originator, rreq.destination, mySeqNum, 0, prevHop); // 0 hops to ourselves, next_hop is who sent us the RREQ
-        // Cancel rebroadcast of RREQ since we are the target
-        router->cancelSending(mp.from, mp.id);
-        LOG_DEBUG("AODV: Target canceled RREQ rebroadcast id=0x%x", mp.id);
-        return;
+        // Consume packet to prevent rebroadcast - we are the target
+        LOG_DEBUG("AODV: Target consuming RREQ to prevent rebroadcast id=0x%x", mp.id);
+        return true; // Stop processing - prevents RoutingModule from rebroadcasting
     }
 
     // Do we have a route to the destination?
@@ -102,13 +100,14 @@ void AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
         LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=%d, next_hop=0x%x (intermediate)", 
                  rreq.originator, rreq.destination, route->destSeqNum, route->hopCount, prevHop);
         sendRREP(rreq.originator, rreq.destination, route->destSeqNum, route->hopCount, prevHop);
-        return;
+        return false; // Allow rebroadcast by other nodes
     }
 
     // Forward RREQ if we're not the destination and don't have a route
     LOG_INFO("AODV RREQ RBCAST: orig=0x%x, dest=0x%x, ID=%u, hops=%d (will be %d after forward)", 
              rreq.originator, rreq.destination, rreq.rreq_id, hopCount, hopCount + 1);
     //forwardRREQ(mp, rreq);
+    return false; // Allow RoutingModule to rebroadcast
 }
 
 void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtastic_RouteReply &rrep)
