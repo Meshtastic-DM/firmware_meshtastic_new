@@ -45,10 +45,8 @@ typedef struct _meshtastic_SDNRouteUpdate {
  AODV destination sequence number */
     uint32_t dest_seq_num;
     /* *
- Node reporting this route (this node's ID) */
-    uint32_t reporter_node;
-    /* *
- Unix timestamp when route was learned */
+ Unix timestamp when route was learned
+ Reporter node is available in MeshPacket.from field */
     uint32_t timestamp;
 } meshtastic_SDNRouteUpdate;
 
@@ -135,14 +133,14 @@ extern "C" {
 
 /* Initializer values for message structs */
 #define meshtastic_SDNAnnouncement_init_default  {{0, {0}}, {0, {0}}, 0, 0}
-#define meshtastic_SDNRouteUpdate_init_default   {0, 0, 0, 0, 0, 0}
+#define meshtastic_SDNRouteUpdate_init_default   {0, 0, 0, 0, 0}
 #define meshtastic_SDNRouteCommand_init_default  {0, 0}
 #define meshtastic_SDNRouteInstall_init_default  {0, 0, 0}
 #define meshtastic_SDNRouteSet_init_default      {0, 0, 0}
 #define meshtastic_SDNRouteSetConfirm_init_default {0, 0, 0, ""}
 #define meshtastic_SDN_init_default              {0, {meshtastic_SDNAnnouncement_init_default}}
 #define meshtastic_SDNAnnouncement_init_zero     {{0, {0}}, {0, {0}}, 0, 0}
-#define meshtastic_SDNRouteUpdate_init_zero      {0, 0, 0, 0, 0, 0}
+#define meshtastic_SDNRouteUpdate_init_zero      {0, 0, 0, 0, 0}
 #define meshtastic_SDNRouteCommand_init_zero     {0, 0}
 #define meshtastic_SDNRouteInstall_init_zero     {0, 0, 0}
 #define meshtastic_SDNRouteSet_init_zero         {0, 0, 0}
@@ -158,8 +156,7 @@ extern "C" {
 #define meshtastic_SDNRouteUpdate_next_hop_tag   2
 #define meshtastic_SDNRouteUpdate_hop_count_tag  3
 #define meshtastic_SDNRouteUpdate_dest_seq_num_tag 4
-#define meshtastic_SDNRouteUpdate_reporter_node_tag 5
-#define meshtastic_SDNRouteUpdate_timestamp_tag  6
+#define meshtastic_SDNRouteUpdate_timestamp_tag  5
 #define meshtastic_SDNRouteCommand_destination_tag 1
 #define meshtastic_SDNRouteCommand_next_hop_tag  2
 #define meshtastic_SDNRouteInstall_destination_tag 1
@@ -193,8 +190,7 @@ X(a, STATIC,   SINGULAR, FIXED32,  destination,       1) \
 X(a, STATIC,   SINGULAR, UINT32,   next_hop,          2) \
 X(a, STATIC,   SINGULAR, UINT32,   hop_count,         3) \
 X(a, STATIC,   SINGULAR, UINT32,   dest_seq_num,      4) \
-X(a, STATIC,   SINGULAR, FIXED32,  reporter_node,     5) \
-X(a, STATIC,   SINGULAR, FIXED32,  timestamp,         6)
+X(a, STATIC,   SINGULAR, FIXED32,  timestamp,         5)
 #define meshtastic_SDNRouteUpdate_CALLBACK NULL
 #define meshtastic_SDNRouteUpdate_DEFAULT NULL
 
@@ -266,7 +262,7 @@ extern const pb_msgdesc_t meshtastic_SDN_msg;
 #define meshtastic_SDNRouteInstall_size          20
 #define meshtastic_SDNRouteSetConfirm_size       55
 #define meshtastic_SDNRouteSet_size              20
-#define meshtastic_SDNRouteUpdate_size           33
+#define meshtastic_SDNRouteUpdate_size           28
 #define meshtastic_SDN_size                      65
 
 #ifdef __cplusplus
