@@ -334,10 +334,10 @@ void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const mesh
             
             // Add route to reporter with relay as next hop
             uint8_t hopCount = mp.hop_start - mp.hop_limit + 1;
-            aodvModule->getRouteTable()->updateRoute(update.reporter_node, relayNode, hopCount, update.dest_seq_num);
+            aodvModule->getRouteTable()->updateRoute(mp.from, relayNode, hopCount, update.dest_seq_num);
             
             LOG_INFO("SDN: Added reverse route to reporter 0x%x via relay 0x%x (hops=%u)",
-                     update.reporter_node, relayNode, hopCount);
+                     mp.from, relayNode, hopCount);
         }
     }
 
@@ -347,7 +347,7 @@ void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const mesh
     }
 
     LOG_INFO("SDN: Route update from 0x%x: dest=0x%x, next_hop=0x%x, hops=%u, seq=%u",
-             update.reporter_node, update.destination, update.next_hop,
+             mp.from, update.destination, update.next_hop,
              update.hop_count, update.dest_seq_num);
 
     // TODO: Add auth for route updates too (HMAC/signature) to prevent fake route injection.
@@ -490,7 +490,6 @@ void SDNModule::sendRouteUpdate(uint32_t destination, uint8_t nextHop, uint8_t h
     update.next_hop = nextHop;
     update.hop_count = hopCount;
     update.dest_seq_num = destSeqNum;
-    update.reporter_node = nodeDB->getNodeNum();
 
     uint32_t timestamp = getTime();
     if (timestamp == 0) {
