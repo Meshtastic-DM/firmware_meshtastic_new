@@ -8,6 +8,7 @@
 #include "error.h"
 #include "main.h"
 #include "mesh-pb-constants.h"
+#include "modules/SDNModule.h"
 #include <pb_decode.h>
 #include <pb_encode.h>
 
@@ -457,6 +458,11 @@ void RadioLibInterface::handleReceiveInterrupt()
                   radioBuffer.header.to, radioBuffer.header.from, radioBuffer.header.flags);
         rxBad++;
 
+        // Track failed RX for SDN (relay_node may be unreliable in corrupted packets)
+        if (sdnModule && radioBuffer.header.relay_node != 0 && radioBuffer.header.relay_node != NO_RELAY_NODE) {
+            sdnModule->recordReception(radioBuffer.header.relay_node, false);
+        }
+
         airTime->logAirtime(RX_ALL_LOG, rxMsec);
 
     } else {
@@ -467,6 +473,12 @@ void RadioLibInterface::handleReceiveInterrupt()
         if (payloadLen < 0) {
             LOG_WARN("Ignore received packet too short");
             rxBad++;
+
+            // Track failed RX for SDN (relay_node may be unreliable in corrupted packets)
+            if (sdnModule && radioBuffer.header.relay_node != 0 && radioBuffer.header.relay_node != NO_RELAY_NODE) {
+                sdnModule->recordReception(radioBuffer.header.relay_node, false);
+            }
+
             airTime->logAirtime(RX_ALL_LOG, rxMsec);
         } else {
             rxGood++;
@@ -496,6 +508,11 @@ void RadioLibInterface::handleReceiveInterrupt()
             mp->relay_node = mp->hop_start == 0 ? NO_RELAY_NODE : radioBuffer.header.relay_node;
 
             addReceiveMetadata(mp);
+
+            // Track per-relay PDR for SDN
+            if (sdnModule && mp->relay_node != 0 && mp->relay_node != NO_RELAY_NODE) {
+                sdnModule->recordReception(mp->relay_node, true);
+            }
 
             mp->which_payload_variant =
                 meshtastic_MeshPacket_encrypted_tag; // Mark that the payload is still encrypted at this point
