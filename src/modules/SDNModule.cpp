@@ -10,6 +10,8 @@
 
 #if ARCH_PORTDUINO
 #include "platform/portduino/SimRadio.h"
+#else
+#include "mesh/RadioLibInterface.h"
 #endif
 
 SDNModule *sdnModule;
