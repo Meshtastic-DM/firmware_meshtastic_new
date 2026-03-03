@@ -353,8 +353,10 @@ void MeshService::sendRoutingErrorResponse(meshtastic_Routing_Error error, const
 
     // Use the routing module to send the error response
     if (routingModule) {
-        LOG_INFO("NAK SEND: to=0x%x, for_id=0x%x, err=%d (routing error response)", mp->from, mp->id, error);
-        routingModule->sendAckNak(error, mp->from, mp->id, mp->channel);
+        // Send NAK to local node for internal delivery to phone (phone packets have from=0x0)
+        NodeNum localNode = nodeDB->getNodeNum();
+        LOG_INFO("NAK SEND: to=0x%x (self), for_id=0x%x, err=%d (routing error response)", localNode, mp->id, error);
+        routingModule->sendAckNak(error, localNode, mp->id, mp->channel);
     } else {
         LOG_ERROR("Cannot send routing error response: no routing module");
     }
