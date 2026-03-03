@@ -139,5 +139,5 @@ class AODVRouteTable
     size_t getRouteCount() const { return routes.size(); }
 
     // Get all valid routes (for route table queries)
-    const std::map<uint32_t, AODVRouteEntry> &getAllRoutes() const { return routes; }
+    const std::map<uint32_t, std::vector<AODVRouteEntry>> &getAllRoutes() const { return routes; }
 };

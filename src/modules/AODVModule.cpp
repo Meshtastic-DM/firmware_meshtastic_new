@@ -653,36 +653,34 @@ void AODVModule::sendRouteTableResponse(uint32_t requester, uint32_t requestId)
     // Populate route entries (up to max 20)
     rtResp.routes_count = 0;
     for (const auto &entry : allRoutes) {
+        const auto &routeVec = entry.second; // vector<AODVRouteEntry>
+
+        for (const auto &route : routeVec) {
+            if (rtResp.routes_count >= 20) {
+                LOG_WARN("AODV: Route table response limited to 20 entries");
+                break;
+            }
+
+            meshtastic_RouteEntry &re = rtResp.routes[rtResp.routes_count];
+
+            re.destination = route.destination;
+            re.next_hop = route.nextHop;
+            re.hop_count = route.hopCount;
+            re.destination_seq_num = route.destSeqNum;
+
+            if (route.isValid && route.expiryTime > now) {
+                re.lifetime = (route.expiryTime - now) / 1000;
+            } else {
+                re.lifetime = 0;
+            }
+
+            re.valid = route.isValid && !route.isExpired();
+            rtResp.routes_count++;
+        }
+
         if (rtResp.routes_count >= 20) {
-            LOG_WARN("AODV: Route table response limited to 20 entries");
             break;
         }
-
-        const AODVRouteEntry &route = entry.second;
-        meshtastic_RouteEntry &re = rtResp.routes[rtResp.routes_count];
-        
-        // Populate all fields - include both valid and invalid routes
-        re.destination = route.destination;  // Full 32-bit node number
-        
-        // Convert 8-bit next hop to full 32-bit by reconstructing
-        // In AODV, nextHop is stored as 8-bit last byte, but we need full 32-bit for response
-        // For now, just use the 8-bit value (the Python code will handle this)
-        re.next_hop = route.nextHop;  
-        
-        re.hop_count = route.hopCount;
-        re.destination_seq_num = route.destSeqNum;
-        
-        // Calculate lifetime in seconds
-        if (route.isValid && route.expiryTime > now) {
-            re.lifetime = (route.expiryTime - now) / 1000;
-        } else {
-            re.lifetime = 0;
-        }
-        
-        // Set valid flag
-        re.valid = route.isValid && !route.isExpired();
-
-        rtResp.routes_count++;
     }
 
     LOG_INFO("AODV: Sending route table response to 0x%x (request_id=%u, routes=%d)", 
