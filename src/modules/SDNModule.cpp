@@ -4,9 +4,12 @@
 #include "NodeDB.h"
 #include "Router.h"
 #include "RTC.h"
+#include "airtime.h"
 #include "configuration.h"
 #include <pb_encode.h>
 #include <SHA256.h>
+#include <vector>
+#include <algorithm>
 
 #if ARCH_PORTDUINO
 #include "platform/portduino/SimRadio.h"
@@ -823,92 +826,83 @@ void SDNModule::sendLinkQualityReports()
         return;
     }
     
-    // Get global TX statistics (SimRadio for native, RadioLibInterface for hardware)
-    uint32_t txGoodGlobal = 0;
-    uint32_t txDropGlobal = 0;
-    float linkReliabilityGlobal = 0.0f;
-    
-#if ARCH_PORTDUINO
-    // Native/simulator environment - use SimRadio
-    if (SimRadio::instance) {
-        txGoodGlobal = SimRadio::instance->txGood;
-        txDropGlobal = SimRadio::instance->txDrop;
-        uint32_t txTotal = txGoodGlobal + txDropGlobal;
-        if (txTotal > 0) {
-            linkReliabilityGlobal = (float)txGoodGlobal / txTotal;
-        }
-    }
-#else
-    // Hardware environment - use RadioLibInterface
-    if (RadioLibInterface::instance) {
-        txGoodGlobal = RadioLibInterface::instance->txGood;
-        txDropGlobal = RadioLibInterface::instance->txDrop;
-        uint32_t txTotal = txGoodGlobal + txDropGlobal;
-        if (txTotal > 0) {
-            linkReliabilityGlobal = (float)txGoodGlobal / txTotal;
-        }
-    }
-#endif
-    
-    uint32_t timestamp = getTime();
-    if (timestamp == 0) {
-        timestamp = millis() / 1000;
-    }
-    
-    uint32_t reportCount = 0;
-    
-    // Send one report per relay node with data
+    // Collect relay nodes with data and sort by total packets (descending)
+    std::vector<std::pair<uint32_t, NeighborLinkStats*>> sortedRelays;
     for (auto &entry : neighborStats) {
-        NeighborLinkStats &stats = entry.second;
-        
-        uint32_t total = stats.getTotalPackets();
-        if (total == 0) {
-            continue;  // Skip relays with no data
+        uint32_t total = entry.second.getTotalPackets();
+        if (total > 0) {
+            sortedRelays.push_back({total, &entry.second});
         }
-        
-        meshtastic_SDNLinkQuality lq = meshtastic_SDNLinkQuality_init_default;
-        lq.relay_node = stats.relayNode;
-        lq.rx_good = stats.rxGood;
-        lq.rx_bad = stats.rxBad;
-        lq.pdr = stats.getPDR();
-        lq.tx_good_global = txGoodGlobal;
-        lq.tx_drop_global = txDropGlobal;
-        lq.link_reliability_global = linkReliabilityGlobal;
-        lq.timestamp = timestamp;
-        
-        meshtastic_SDN sdn = meshtastic_SDN_init_default;
-        sdn.which_payload_variant = meshtastic_SDN_link_quality_tag;
-        sdn.payload_variant.link_quality = lq;
-        
-        meshtastic_MeshPacket *p = router->allocForSending();
-        p->to = sdnControllerNode;
-        p->decoded.portnum = meshtastic_PortNum_SDN_APP;
-        p->channel = channels.getPrimaryIndex();
-        p->want_ack = false;
-        p->hop_limit = config.lora.hop_limit;
-        
-        p->decoded.payload.size = pb_encode_to_bytes(
-            p->decoded.payload.bytes,
-            sizeof(p->decoded.payload.bytes),
-            &meshtastic_SDN_msg,
-            &sdn
-        );
-        
-        LOG_INFO("SDN: Link quality relay=0x%x PDR=%.1f%% (%u/%u) GlobalLinkRel=%.1f%%",
-                 stats.relayNode, lq.pdr * 100, stats.rxGood, total,
-                 linkReliabilityGlobal * 100);
-        
-        router->sendLocal(p);
-        stats.lastReportTime = millis();
-        reportCount++;
-        
-        // Delay between reports to avoid flooding
-        delay(50);
     }
     
-    LOG_INFO("SDN: Sent %u link quality reports to controller 0x%x (%zu active relays)",
-             reportCount, sdnControllerNode, activeRelays);
+    if (sortedRelays.empty()) {
+        LOG_DEBUG("SDN: No relay data to report");
+        return;
+    }
     
+    // Sort by total packets descending
+    std::sort(sortedRelays.begin(), sortedRelays.end(),
+              [](const std::pair<uint32_t, NeighborLinkStats*> &a, 
+                 const std::pair<uint32_t, NeighborLinkStats*> &b) { 
+                  return a.first > b.first; 
+              });
+    
+    // Take top 3
+    size_t numToReport = sortedRelays.size() < 3 ? sortedRelays.size() : 3;
+    
+    // Create single packet with arrays for top 3 relays
+    meshtastic_SDNLinkQuality lq = meshtastic_SDNLinkQuality_init_default;
+    
+    // Fill arrays for top 3 relays
+    for (size_t i = 0; i < numToReport; i++) {
+        NeighborLinkStats *stats = sortedRelays[i].second;
+        lq.relay_node[i] = stats->relayNode;
+        lq.rx_good[i] = stats->rxGood;
+        lq.rx_bad[i] = stats->rxBad;
+        stats->lastReportTime = millis();
+    }
+    lq.relay_node_count = numToReport;
+    lq.rx_good_count = numToReport;
+    lq.rx_bad_count = numToReport;
+    
+    // Add channel utilization (single values)
+    if (airTime) {
+        lq.channel_utilization = airTime->channelUtilizationPercent();
+        lq.air_util_tx = airTime->utilizationTXPercent();
+    } else {
+        lq.channel_utilization = 0.0f;
+        lq.air_util_tx = 0.0f;
+    }
+    
+    // Send single packet
+    meshtastic_SDN sdn = meshtastic_SDN_init_default;
+    sdn.which_payload_variant = meshtastic_SDN_link_quality_tag;
+    sdn.payload_variant.link_quality = lq;
+    
+    meshtastic_MeshPacket *p = router->allocForSending();
+    p->to = sdnControllerNode;
+    p->decoded.portnum = meshtastic_PortNum_SDN_APP;
+    p->channel = channels.getPrimaryIndex();
+    p->want_ack = false;
+    p->hop_limit = config.lora.hop_limit;
+    
+    p->decoded.payload.size = pb_encode_to_bytes(
+        p->decoded.payload.bytes,
+        sizeof(p->decoded.payload.bytes),
+        &meshtastic_SDN_msg,
+        &sdn
+    );
+    
+    LOG_INFO("SDN: Link quality report: %zu relays, ChUtil=%.1f%% AirTX=%.1f%%",
+             numToReport, lq.channel_utilization, lq.air_util_tx);
+    for (size_t i = 0; i < numToReport; i++) {
+        uint32_t total = lq.rx_good[i] + lq.rx_bad[i];
+        float pdr = (total > 0) ? ((float)lq.rx_good[i] / total * 100) : 0.0f;
+        LOG_INFO("  [%zu] Relay=0x%x RxGood=%u RxBad=%u PDR=%.1f%%",
+                 i, lq.relay_node[i], lq.rx_good[i], lq.rx_bad[i], pdr);
+    }
+    
+    router->sendLocal(p);
     lastLinkQualityReport = millis();
 }
 
@@ -919,18 +913,28 @@ void SDNModule::handleSDNLinkQuality(const meshtastic_MeshPacket &mp, const mesh
     }
     
     uint32_t reporterNode = mp.from;
-    uint32_t rxTotal = lq.rx_good + lq.rx_bad;
-    uint32_t txTotal = lq.tx_good_global + lq.tx_drop_global;
+    uint32_t receiptTimestamp = getTime();
+    if (receiptTimestamp == 0) {
+        receiptTimestamp = millis() / 1000;
+    }
     
-    LOG_INFO("SDN: Link quality from reporter=0x%x relay=0x%x PDR=%.1f%% (%u/%u) GlobalTX=%.1f%% (%u/%u)",
-             reporterNode, lq.relay_node,
-             lq.pdr * 100, lq.rx_good, rxTotal,
-             lq.link_reliability_global * 100, lq.tx_good_global, txTotal);
+    LOG_INFO("SDN: Link quality from reporter=0x%x: %u relays, ChUtil=%.1f%% AirTX=%.1f%% ts=%u",
+             reporterNode, lq.relay_node_count,
+             lq.channel_utilization, lq.air_util_tx, receiptTimestamp);
+    
+    // Process each relay in the arrays
+    for (size_t i = 0; i < lq.relay_node_count && i < 3; i++) {
+        uint32_t rxTotal = lq.rx_good[i] + lq.rx_bad[i];
+        float computedPDR = (rxTotal > 0) ? ((float)lq.rx_good[i] / rxTotal) : 0.0f;
+        
+        LOG_INFO("  Relay[%zu]: 0x%x PDR=%.1f%% (%u/%u)",
+                 i, lq.relay_node[i], computedPDR * 100, lq.rx_good[i], rxTotal);
+    }
     
     // TODO: Store in controller's topology database
-    // Interpretation: 
-    // - PDR shows link quality from relay_node -> reporter
-    // - Global TX shows reporter's overall transmission capacity
+    // Interpretation:
+    // - PDR shows link quality from relay_node -> reporter (computed at controller)
+    // - Channel utilization shows reporter's overall channel usage
 }
 
 int32_t SDNModule::runOnce()
