@@ -15,6 +15,7 @@
 #define AODV_MAX_PENDING_PACKETS_PER_DEST 5  // Buffer limit per destination
 #define AODV_MAX_RREQ_PER_ORIGINATOR 3        // Maximum RREQs to process per originator at destination
 #define AODV_ROUTE_CLEANUP_INTERVAL 60000     // 60s - periodic route table cleanup
+#define AODV_ROUTE_TABLE_PRINT_INTERVAL 60000 // 60s - periodic route table dump to serial logs
 
 /*
  * Represents a single route entry in the AODV routing table
@@ -136,4 +137,7 @@ class AODVRouteTable
     void cleanup(); // Periodic cleanup of expired entries
     void dumpRoutes() const; // Debug: dump all routes to log
     size_t getRouteCount() const { return routes.size(); }
+
+    // Get all valid routes (for route table queries)
+    const std::map<uint32_t, AODVRouteEntry> &getAllRoutes() const { return routes; }
 };

@@ -18,7 +18,16 @@ PB_BIND(meshtastic_RouteError, meshtastic_RouteError, AUTO)
 PB_BIND(meshtastic_UnreachableNode, meshtastic_UnreachableNode, AUTO)
 
 
-PB_BIND(meshtastic_AODV, meshtastic_AODV, AUTO)
+PB_BIND(meshtastic_RouteTableRequest, meshtastic_RouteTableRequest, AUTO)
+
+
+PB_BIND(meshtastic_RouteEntry, meshtastic_RouteEntry, AUTO)
+
+
+PB_BIND(meshtastic_RouteTableResponse, meshtastic_RouteTableResponse, 2)
+
+
+PB_BIND(meshtastic_AODV, meshtastic_AODV, 2)
 
 
 
