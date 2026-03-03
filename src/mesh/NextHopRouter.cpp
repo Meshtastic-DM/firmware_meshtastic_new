@@ -63,6 +63,12 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
         !isAodvControl && !isSdnControl && !isRoutingCtrl) {
         LOG_INFO("AODV: No route to 0x%x, initiating route discovery", p->to);
         aodvModule->initiateRouteDiscovery(p->to, packetPool.allocCopy(*p));
+        
+        // Stop retransmissions - packet is now managed by AODV buffer
+        // AODV will deliver it once route is found, no need for original retransmission
+        LOG_DEBUG("AODV: Stopping retransmission for buffered packet id=0x%x", p->id);
+        stopRetransmission(getFrom(p), p->id);
+        
         // Original packet will be buffered by AODV module, release this one
         packetPool.release(p);
         return ERRNO_OK;
