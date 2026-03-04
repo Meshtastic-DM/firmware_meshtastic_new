@@ -154,7 +154,7 @@ SDNModule::SDNModule()
 
     // Test-only configuration until SDN config is added to module/local config protobufs.
     static constexpr uint32_t kTestControllerNode = 0x00000010;
-    static constexpr uint32_t kTestAnnouncementIntervalSec = 900;  // 15 minutes
+    static constexpr uint32_t kTestAnnouncementIntervalSec = 300;  // 5 minutes
     static constexpr const char *kTestSecret = "meshtastic-sdn-secret";
 
     announcementInterval = kTestAnnouncementIntervalSec;
