@@ -340,18 +340,7 @@ void AODVModule::handleLinkFailure(uint32_t destination)
     aodv.variant.rerr = rerr;
 
     if (route->precursor == NODENUM_BROADCAST) {
-        // Broadcast case: send a single broadcast RERR
-        meshtastic_MeshPacket *p = router->allocForSending();
-        p->to = NODENUM_BROADCAST;
-        p->decoded.portnum = meshtastic_PortNum_AODV_ROUTING_APP;
-        p->channel = channels.getPrimaryIndex();
-        p->want_ack = false;
-        p->hop_limit = config.lora.hop_limit;
-        p->decoded.payload.size =
-            pb_encode_to_bytes(p->decoded.payload.bytes, sizeof(p->decoded.payload.bytes), &meshtastic_AODV_msg, &aodv);
-
-        LOG_INFO("AODV: Broadcasting RERR for 0x%x", destination);
-        router->sendLocal(p);
+        LOG_INFO("AODV: Broadcast precursor for 0x%x; skipping RERR", destination);
     } else {
         // Unicast case: send only to precursor
         if (route->precursor != 0) {
