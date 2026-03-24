@@ -178,10 +178,17 @@ NodeNum MeshService::getNodenumFromRequestId(uint32_t request_id)
 void MeshService::handleToRadio(meshtastic_MeshPacket &p)
 {
 #if defined(ARCH_PORTDUINO)
-    if (SimRadio::instance && p.decoded.portnum == meshtastic_PortNum_SIMULATOR_APP) {
-        // Simulates device received a packet via the LoRa chip
-        SimRadio::instance->unpackAndReceive(p);
-        return;
+    if (SimRadio::instance) {
+        bool isSimulatorWrappedPacket =
+            p.which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
+            p.decoded.portnum == meshtastic_PortNum_SIMULATOR_APP;
+        bool isInjectedCiphertextPacket = p.which_payload_variant == meshtastic_MeshPacket_encrypted_tag;
+
+        if (isSimulatorWrappedPacket || isInjectedCiphertextPacket) {
+            // Simulates device received a packet via the LoRa chip
+            SimRadio::instance->unpackAndReceive(p);
+            return;
+        }
     }
 #endif
     p.from = 0;                          // We don't let clients assign nodenums to their sent messages
