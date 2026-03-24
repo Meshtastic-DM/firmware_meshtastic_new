@@ -257,13 +257,9 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
         return;
     }
 
-    uint32_t now = getTime();
-    if (now != 0) {
-        if (ann.timestamp > now + 60 || now - ann.timestamp > 600) {
-            LOG_WARN("SDN: Announcement timestamp out of window (ann=%u now=%u)", ann.timestamp, now);
-            return;
-        }
-    }
+    // Note: Timestamp validation removed - controller and nodes may use different time sources
+    // (system time vs uptime). Sequence number provides sufficient replay protection.
+
     g_lastAcceptedControllerSeq = ann.sequence_num;
 
     sdnAuthenticated = true;
@@ -308,31 +304,66 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
 
 void SDNModule::installAdminKey()
 {
+    LOG_INFO("SDN: installAdminKey() called - has_security=%d, admin_key_count=%u, admin_channel_enabled=%d",
+             config.has_security, config.security.admin_key_count, config.security.admin_channel_enabled);
+
+    // Ensure security config is marked as present
+    if (!config.has_security) {
+        config.has_security = true;
+        LOG_INFO("SDN: Enabled has_security flag");
+    }
+
     bool needsSave = false;
-    
+
     // Enable admin channel if disabled
     if (!config.security.admin_channel_enabled) {
         config.security.admin_channel_enabled = true;
         needsSave = true;
         LOG_INFO("SDN: Enabled admin channel for remote administration");
     }
-    
+
     // Check if SDN key is already installed in slot 0
-    if (config.security.admin_key[0].size == 32 &&
+    if (config.security.admin_key_count > 0 &&
+        config.security.admin_key[0].size == 32 &&
         memcmp(config.security.admin_key[0].bytes, sdnPublicKey, 32) == 0) {
-        LOG_DEBUG("SDN: Controller admin key already installed in slot 0");
+        LOG_INFO("SDN: Controller admin key already installed in slot 0");
+        // Key matches, but we may still need to save if admin channel was just enabled
+        if (needsSave) {
+            if (service) {
+                LOG_INFO("SDN: Saving config after enabling admin channel");
+                service->reloadConfig(SEGMENT_CONFIG);
+            } else {
+                LOG_WARN("SDN: Cannot save config - service is NULL");
+            }
+        }
         return;
     }
-    
+
+    LOG_INFO("SDN: Installing SDN controller public key in admin_key[0] (current admin_key_count=%u)",
+             config.security.admin_key_count);
+
     // Install SDN controller public key in admin_key[0] (reserved for SDN)
     memcpy(config.security.admin_key[0].bytes, sdnPublicKey, 32);
     config.security.admin_key[0].size = 32;
+
+    // Update admin_key_count - ensure slot 0 is counted
+    if (config.security.admin_key_count == 0) {
+        config.security.admin_key_count = 1;
+        LOG_INFO("SDN: Set admin_key_count to 1");
+    } else {
+        LOG_INFO("SDN: Kept existing admin_key_count=%u", config.security.admin_key_count);
+    }
+
     needsSave = true;
     LOG_INFO("SDN: Installed controller public key in admin_key[0] for remote administration");
-    
+
     // Save configuration changes
-    if (needsSave && service) {
+    if (service) {
+        LOG_INFO("SDN: Saving config to persistent storage (admin_key_count=%u)", config.security.admin_key_count);
         service->reloadConfig(SEGMENT_CONFIG);
+        LOG_INFO("SDN: Config save completed");
+    } else {
+        LOG_ERROR("SDN: CRITICAL - Cannot save config, service pointer is NULL!");
     }
 }
 

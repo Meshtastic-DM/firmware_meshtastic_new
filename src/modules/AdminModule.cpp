@@ -845,11 +845,15 @@ void AdminModule::handleSetConfig(const meshtastic_Config &c)
         }
         
         config.security = c.payload_variant.security;
-        
+
         // Restore SDN key after assignment if it was authenticated
         if (hasSdnKey) {
             memcpy(config.security.admin_key[0].bytes, sdnKeyBackup, 32);
             config.security.admin_key[0].size = 32;
+            // Ensure admin_key_count includes the SDN key in slot 0
+            if (config.security.admin_key_count == 0) {
+                config.security.admin_key_count = 1;
+            }
         }
 #if !(MESHTASTIC_EXCLUDE_PKI_KEYGEN) && !(MESHTASTIC_EXCLUDE_PKI)
         // If the client set the key to blank, go ahead and regenerate so long as we're not in ham mode
