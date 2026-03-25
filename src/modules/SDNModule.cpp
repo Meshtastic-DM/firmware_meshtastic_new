@@ -23,10 +23,7 @@ SDNModule *sdnModule;
  * NOTE:
  * - Replaced the insecure "XOR + hash" with real HMAC-SHA256 (truncated to 16 bytes).
  * - HMAC covers: controller_id + seq + timestamp + public_key (prevents spoof + binds key).
- * - Added anti-replay using sequence number (single controller assumption).
  */
-
-static uint32_t g_lastAcceptedControllerSeq = 0;
 static uint32_t g_sdnAnnouncementSeqFallback = 0;
 
 static void sha256_once(const uint8_t *data, size_t len, uint8_t out[32])
@@ -250,17 +247,8 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
         return;
     }
 
-    // Anti-replay (single-controller assumption)
-    if (ann.sequence_num <= g_lastAcceptedControllerSeq) {
-        LOG_WARN("SDN: Replay/old announcement from 0x%x seq=%u last=%u",
-                 controllerNode, ann.sequence_num, g_lastAcceptedControllerSeq);
-        return;
-    }
-
     // Note: Timestamp validation removed - controller and nodes may use different time sources
-    // (system time vs uptime). Sequence number provides sufficient replay protection.
-
-    g_lastAcceptedControllerSeq = ann.sequence_num;
+    // (system time vs uptime).
 
     sdnAuthenticated = true;
     sdnControllerNode = controllerNode;
