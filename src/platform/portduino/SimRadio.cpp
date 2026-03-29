@@ -207,26 +207,86 @@ void SimRadio::startSend(meshtastic_MeshPacket *txp)
 {
     printPacket("Start low level send", txp);
     isReceiving = false;
-    size_t numbytes = beginSending(txp);
+    beginSending(txp);
+
     meshtastic_MeshPacket *p = packetPool.allocCopy(*txp);
-    perhapsDecode(p);
+
+    // Try to decode (works for PSK packets we can decrypt locally, and for packets already decoded)
+    DecodeState st = perhapsDecode(p);
+
     meshtastic_Compressed c = meshtastic_Compressed_init_default;
-    c.portnum = p->decoded.portnum;
-    // LOG_DEBUG("Send back to simulator with portNum %d", p->decoded.portnum);
-    if (p->decoded.payload.size <= sizeof(c.data.bytes)) {
-        memcpy(&c.data.bytes, p->decoded.payload.bytes, p->decoded.payload.size);
-        c.data.size = p->decoded.payload.size;
+
+    if (st == DecodeState::DECODE_SUCCESS &&
+        p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
+
+        // Normal case: we have plaintext app payload
+        c.portnum = p->decoded.portnum;
+
+        if (p->decoded.payload.size <= sizeof(c.data.bytes)) {
+            memcpy(c.data.bytes, p->decoded.payload.bytes, p->decoded.payload.size);
+            c.data.size = p->decoded.payload.size;
+        } else {
+            LOG_WARN("Payload too large for Compressed wrapper (decoded). Sending empty.");
+            c.data.size = 0;
+        }
+
     } else {
-        LOG_WARN("Payload size larger than compressed message allows! Send empty payload");
+        // Decode failed -> send ciphertext back to simulator UI
+        // Marker: Compressed.portnum == UNKNOWN_APP
+        c.portnum = meshtastic_PortNum_UNKNOWN_APP;
+
+        if (p->which_payload_variant == meshtastic_MeshPacket_encrypted_tag) {
+            const size_t max = sizeof(c.data.bytes);
+            if (p->encrypted.size <= max) {
+                memcpy(c.data.bytes, p->encrypted.bytes, p->encrypted.size);
+                c.data.size = p->encrypted.size;
+            } else {
+                LOG_WARN("Ciphertext too large for Compressed wrapper. Sending empty.");
+                c.data.size = 0;
+            }
+        } else {
+            // Not encrypted (or corrupted) and we couldn't decode -> nothing meaningful to send
+            c.data.size = 0;
+        }
     }
+
+
+    // Now wrap into SIMULATOR_APP payload
+    // Preserve important fields before zeroing decoded structure
+    uint32_t saved_request_id = p->decoded.request_id;
+    bool saved_want_response = p->decoded.want_response;
+    uint32_t saved_dest = p->decoded.dest;
+    uint32_t saved_source = p->decoded.source;
+    uint32_t saved_reply_id = p->decoded.reply_id;
+    uint32_t saved_emoji = p->decoded.emoji;
+    bool saved_has_bitfield = p->decoded.has_bitfield;
+    uint8_t saved_bitfield = p->decoded.bitfield;
+
+    // Ensure decoded union is valid before writing into it
+    p->which_payload_variant = meshtastic_MeshPacket_decoded_tag;
+    memset(&p->decoded, 0, sizeof(p->decoded));
+
     p->decoded.payload.size =
-        pb_encode_to_bytes(p->decoded.payload.bytes, sizeof(p->decoded.payload.bytes), &meshtastic_Compressed_msg, &c);
+        pb_encode_to_bytes(p->decoded.payload.bytes, sizeof(p->decoded.payload.bytes),
+                           &meshtastic_Compressed_msg, &c);
+
     p->decoded.portnum = meshtastic_PortNum_SIMULATOR_APP;
 
+    // Restore preserved fields
+    p->decoded.request_id = saved_request_id;
+    p->decoded.want_response = saved_want_response;
+    p->decoded.dest = saved_dest;
+    p->decoded.source = saved_source;
+    p->decoded.reply_id = saved_reply_id;
+    p->decoded.emoji = saved_emoji;
+    p->decoded.has_bitfield = saved_has_bitfield;
+    p->decoded.bitfield = saved_bitfield;
+
     service->sendQueueStatusToPhone(router->getQueueStatus(), 0, p->id);
-    service->sendToPhone(p); // Sending back to simulator
-    service->loop();         // Process the send immediately
+    service->sendToPhone(p);
+    service->loop();
 }
+
 
 // Simulates device received a packet via the LoRa chip
 void SimRadio::unpackAndReceive(meshtastic_MeshPacket &p)
@@ -234,22 +294,53 @@ void SimRadio::unpackAndReceive(meshtastic_MeshPacket &p)
     // Simulator packet (=Compressed packet) is encapsulated in a MeshPacket, so need to unwrap first
     meshtastic_Compressed scratch;
     meshtastic_Compressed *decoded = NULL;
+
     if (p.which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
         memset(&scratch, 0, sizeof(scratch));
-        p.decoded.payload.size =
-            pb_decode_from_bytes(p.decoded.payload.bytes, p.decoded.payload.size, &meshtastic_Compressed_msg, &scratch);
-        if (p.decoded.payload.size) {
+
+        // Decode Compressed from decoded.payload
+        size_t sz = pb_decode_from_bytes(
+            p.decoded.payload.bytes, p.decoded.payload.size,
+            &meshtastic_Compressed_msg, &scratch
+        );
+
+        if (sz) {
             decoded = &scratch;
-            // Extract the original payload and replace
-            memcpy(&p.decoded.payload, &decoded->data, sizeof(decoded->data));
-            // Switch the port from PortNum_SIMULATOR_APP back to the original PortNum
-            p.decoded.portnum = decoded->portnum;
-        } else
+
+            // If portnum is UNKNOWN_APP => payload bytes are ciphertext
+            if (decoded->portnum == meshtastic_PortNum_UNKNOWN_APP) {
+
+                // Switch packet to encrypted variant and copy ciphertext in
+                p.which_payload_variant = meshtastic_MeshPacket_encrypted_tag;
+
+                // Safety: ensure ciphertext fits MeshPacket.encrypted buffer
+                if (decoded->data.size > sizeof(p.encrypted.bytes)) {
+                    LOG_WARN("Ciphertext too large for MeshPacket.encrypted. Dropping.");
+                    return;
+                }
+
+                memset(&p.encrypted, 0, sizeof(p.encrypted));
+                memcpy(p.encrypted.bytes, decoded->data.bytes, decoded->data.size);
+                p.encrypted.size = decoded->data.size;
+
+                // (optional) if PKI always uses channel 0 in your design:
+                // p.channel = 0;
+
+            } else {
+                // Normal plaintext case: extract original payload and portnum
+                memcpy(&p.decoded.payload, &decoded->data, sizeof(decoded->data));
+                p.decoded.portnum = decoded->portnum;
+            }
+
+        } else {
             LOG_ERROR("Error decoding proto for simulator message!");
+        }
     }
+
     // Let SimRadio receive as if it did via its LoRa chip
     startReceive(&p);
 }
+
 
 void SimRadio::startReceive(meshtastic_MeshPacket *p)
 {
@@ -257,6 +348,12 @@ void SimRadio::startReceive(meshtastic_MeshPacket *p)
     if (isActivelyReceiving()) {
         LOG_WARN("Collision detected, dropping current and previous packet!");
         rxBad++;
+
+        // Track failed RX for SDN
+        if (sdnModule && receivingPacket && receivingPacket->relay_node != 0 && receivingPacket->relay_node != NO_RELAY_NODE) {
+            sdnModule->recordReception(receivingPacket->relay_node, false);
+        }
+
         airTime->logAirtime(RX_ALL_LOG, getPacketTime(receivingPacket, true));
         packetPool.release(receivingPacket);
         receivingPacket = nullptr;
@@ -311,6 +408,7 @@ void SimRadio::handleReceiveInterrupt()
     rxGood++;
 
     meshtastic_MeshPacket *mp = packetPool.allocCopy(*receivingPacket); // keep a copy in packetPool
+
     packetPool.release(receivingPacket);                                // release the original
     receivingPacket = nullptr;
 
