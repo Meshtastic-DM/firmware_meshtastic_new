@@ -106,7 +106,6 @@ bool AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
     // Forward RREQ if we're not the destination and don't have a route
     LOG_INFO("AODV RREQ RBCAST: orig=0x%x, dest=0x%x, ID=%u, hops=%d (will be %d after forward)", 
              rreq.originator, rreq.destination, rreq.rreq_id, hopCount, hopCount + 1);
-    //forwardRREQ(mp, rreq);
     return false; // Allow RoutingModule to rebroadcast
 }
 
@@ -209,10 +208,9 @@ void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtas
         return;
     }
 
-    // Forward RREP toward originator
-    LOG_INFO("AODV RREP FWD: to=0x%x, dest=0x%x, seq=%u, hops=%d (will be %d after forward)", 
-             rrep.originator, rrep.destination, rrep.dest_seq_num, hopCount, hopCount + 1);
-    forwardRREP(mp, rrep, rrep.originator);
+    // Forwarding is handled by NextHopRouter for all next-hop packets, including AODV control.
+    LOG_INFO("AODV RREP ROUTER_FWD: to=0x%x, dest=0x%x, seq=%u, hops=%d", 
+             rrep.originator, rrep.destination, rrep.dest_seq_num, hopCount);
 }
 
 void AODVModule::handleRouteError(const meshtastic_MeshPacket &mp, const meshtastic_RouteError &rerr)
@@ -458,20 +456,6 @@ void AODVModule::sendRREP(uint32_t originator, uint32_t destination, uint32_t de
         pb_encode_to_bytes(p->decoded.payload.bytes, sizeof(p->decoded.payload.bytes), &meshtastic_AODV_msg, &aodv);
 
     LOG_INFO("AODV: Sending RREP to 0x%x for dest 0x%x, next_hop=0x%x", originator, destination, nextHop);
-    router->sendLocal(p);
-}
-
-void AODVModule::forwardRREP(const meshtastic_MeshPacket &receivedPacket, const meshtastic_RouteReply &rrep, uint32_t originator)
-{
-    meshtastic_MeshPacket *p = packetPool.allocCopy(receivedPacket);
-
-    // set relayer to us
-    p->relay_node = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
-
-    // force TTL decrement for AODV control
-    if (p->hop_limit == 0) { packetPool.release(p); return; }
-    p->hop_limit--;
-
     router->sendLocal(p);
 }
 

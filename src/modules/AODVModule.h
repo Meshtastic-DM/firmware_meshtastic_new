@@ -33,7 +33,6 @@ class AODVModule : public ProtobufModule<meshtastic_AODV>, public concurrency::O
 
     // RREP Processing
     void handleRouteReply(const meshtastic_MeshPacket &mp, const meshtastic_RouteReply &rrep);
-    void forwardRREP(const meshtastic_MeshPacket &receivedPacket, const meshtastic_RouteReply &rrep, uint32_t originator);
     void deliverBufferedPackets(uint32_t destination);
 
     // RERR Processing

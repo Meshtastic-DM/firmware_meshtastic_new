@@ -189,7 +189,8 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
         // Log when forwarding packets
         if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
             if (p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP) {
-                // AODV control forwarding logged in AODVModule
+                LOG_INFO("AODV CTRL FWD: from=0x%x, to=0x%x, id=0x%x, hop_limit=%d",
+                         p->from, p->to, p->id, p->hop_limit);
             } else if (p->decoded.portnum != meshtastic_PortNum_ROUTING_APP) {
                 LOG_INFO("DATA FWD: port=%d, from=0x%x, to=0x%x, id=0x%x, hop_limit=%d", 
                          p->decoded.portnum, p->from, p->to, p->id, p->hop_limit);
