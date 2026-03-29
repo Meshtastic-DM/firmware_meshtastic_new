@@ -181,7 +181,8 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
 
         // AODV rule: only the intended next hop forwards
         if (p->next_hop != me) {
-            LOG_DEBUG("Not my next hop (next_hop=%02x, me=%02x), drop", p->next_hop, me);
+            LOG_INFO("DM DROP: dest=0x%x, from=0x%x, next_hop=0x%02x, me=0x%02x, relay=0x%02x",
+                     p->to, p->from, p->next_hop, me, p->relay_node);
             return false;
         }
 
@@ -242,8 +243,9 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
     }
 
     // Case C: Unicast packet with no next_hop set (route missing)
-    // For AODV: drop instead of flooding (route discovery will handle it)
-    LOG_DEBUG("AODV: unicast packet to 0x%x with no next_hop, drop", p->to);
+    // For now, just log this case. A future change can check for a route and fall back to flooding.
+    LOG_INFO("DM NO_NEXT_HOP: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
+             p->to, p->from, p->relay_node, me);
     return false;
 }
 
