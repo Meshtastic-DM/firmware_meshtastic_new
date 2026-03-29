@@ -433,19 +433,6 @@ uint32_t AODVModule::markRREQAsSeen(uint32_t originator, uint32_t destSeqNum, ui
     return responseSeqNum;
 }
 
-void AODVModule::forwardRREQ(const meshtastic_MeshPacket &receivedPacket, const meshtastic_RouteRequest &rreq)
-{
-    meshtastic_MeshPacket *p = packetPool.allocCopy(receivedPacket);
-
-    // set relayer to us
-    p->relay_node = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
-
-    // force TTL decrement for AODV control
-    if (p->hop_limit == 0) { packetPool.release(p); return; }
-
-    router->sendLocal(p);
-}
-
 void AODVModule::sendRREP(uint32_t originator, uint32_t destination, uint32_t destSeqNum, uint8_t hopCount, uint8_t nextHop)
 {
     meshtastic_RouteReply rrep = meshtastic_RouteReply_init_default;
@@ -484,24 +471,6 @@ void AODVModule::forwardRREP(const meshtastic_MeshPacket &receivedPacket, const 
     // force TTL decrement for AODV control
     if (p->hop_limit == 0) { packetPool.release(p); return; }
     p->hop_limit--;
-
-    router->sendLocal(p);
-}
-
-void AODVModule::forwardRERR(const meshtastic_RouteError &rerr)
-{
-    meshtastic_AODV aodv = meshtastic_AODV_init_default;
-    aodv.which_variant = meshtastic_AODV_rerr_tag;
-    aodv.variant.rerr = rerr;
-
-    meshtastic_MeshPacket *p = router->allocForSending();
-    p->to = NODENUM_BROADCAST;
-    p->decoded.portnum = meshtastic_PortNum_AODV_ROUTING_APP;
-    p->channel = channels.getPrimaryIndex(); // Use primary channel for AODV routing control packets
-    p->want_ack = false;
-    p->hop_limit = config.lora.hop_limit;
-    p->decoded.payload.size =
-        pb_encode_to_bytes(p->decoded.payload.bytes, sizeof(p->decoded.payload.bytes), &meshtastic_AODV_msg, &aodv);
 
     router->sendLocal(p);
 }
