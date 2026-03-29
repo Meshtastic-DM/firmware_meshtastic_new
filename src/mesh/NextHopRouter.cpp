@@ -243,11 +243,37 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
         return true;
     }
 
-    // Case C: Unicast packet with no next_hop set (route missing)
-    // For now, just log this case. A future change can check for a route and fall back to flooding.
-    LOG_INFO("DM NO_NEXT_HOP: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
-             p->to, p->from, p->relay_node, me);
-    return false;
+    // Case C: Unicast packet with no next_hop set. If we now have a route, route it.
+    const uint8_t recoveredNextHop = getNextHop(p->to, me);
+    if (recoveredNextHop == NO_NEXT_HOP_PREFERENCE) {
+        LOG_INFO("DM NO_NEXT_HOP: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
+                 p->to, p->from, p->relay_node, me);
+        return false;
+    }
+
+    LOG_INFO("DM REROUTE: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, route_next_hop=0x%02x",
+             p->to, p->from, p->relay_node, me, recoveredNextHop);
+
+    meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
+
+    // We are forwarding now
+    tosend->relay_node = me;
+
+    // Decrement hop_limit using shared logic
+    if (shouldDecrementHopLimit(p)) {
+        tosend->hop_limit--;
+    }
+
+#if USERPREFS_EVENT_MODE
+    if (tosend->hop_limit > 2) {
+        tosend->hop_start -= (tosend->hop_limit - 2);
+        tosend->hop_limit = 2;
+    }
+#endif
+
+    // NextHopRouter::send() will recompute next_hop for the next leg.
+    NextHopRouter::send(tosend);
+    return true;
 }
 
 /**
