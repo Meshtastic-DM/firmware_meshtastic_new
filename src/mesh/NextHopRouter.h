@@ -74,6 +74,9 @@ class NextHopRouter : public FloodingRouter
      */
     virtual ErrorCode send(meshtastic_MeshPacket *p) override;
 
+    virtual void learnRoutingCapableNode(NodeNum node, const char *source = nullptr) override;
+    virtual void learnLegacyNode(NodeNum node, const char *source = nullptr) override;
+
     /** Do our retransmission handling */
     virtual int32_t runOnce() override
     {

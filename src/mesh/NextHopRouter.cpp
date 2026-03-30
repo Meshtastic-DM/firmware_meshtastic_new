@@ -9,6 +9,40 @@
 
 NextHopRouter::NextHopRouter() {}
 
+void NextHopRouter::learnRoutingCapableNode(NodeNum node, const char *source)
+{
+    if (node == 0 || node == getNodeNum()) {
+        return;
+    }
+
+    auto insertedNode = aodvNodes.insert(node);
+    legacyNodes.erase(node);
+
+    if (insertedNode.second) {
+        if (source && source[0]) {
+            LOG_INFO("%s NODE LEARNED: node=0x%x", source, node);
+        } else {
+            LOG_INFO("ROUTING NODE LEARNED: node=0x%x", node);
+        }
+    }
+}
+
+void NextHopRouter::learnLegacyNode(NodeNum node, const char *source)
+{
+    if (node == 0 || node == getNodeNum() || aodvNodes.find(node) != aodvNodes.end()) {
+        return;
+    }
+
+    auto insertedLegacy = legacyNodes.insert(node);
+    if (insertedLegacy.second) {
+        if (source && source[0]) {
+            LOG_INFO("%s NODE LEARNED: node=0x%x", source, node);
+        } else {
+            LOG_INFO("LEGACY NODE LEARNED: node=0x%x", node);
+        }
+    }
+}
+
 PendingPacket::PendingPacket(meshtastic_MeshPacket *p, uint8_t numRetransmissions)
 {
     packet = p;
@@ -55,6 +89,13 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
                          p->decoded.portnum, p->to, p->next_hop, p->id);
             }
         }
+    }
+
+    // Legacy nodes do not participate in AODV route discovery. Keep next_hop unset so this send falls back to flooding.
+    if (isFromUs(p) && !isBroadcast(p->to) && p->next_hop == NO_NEXT_HOP_PREFERENCE &&
+        !isAodvControl && !isSdnControl && !isRoutingCtrl && legacyNodes.find(p->to) != legacyNodes.end()) {
+        LOG_INFO("DATA LEGACY_SEND_FLOOD: dest=0x%x, id=0x%x", p->to, p->id);
+        return Router::send(p);
     }
 
     // If no route exists and we're sending from local node, trigger AODV route discovery
@@ -137,14 +178,6 @@ bool NextHopRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
 
 void NextHopRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtastic_Routing *c)
 {
-    if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
-        p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP) {
-        auto insertedNode = aodvNodes.insert(getFrom(p));
-        if (insertedNode.second) {
-            LOG_INFO("AODV NODE LEARNED: node=0x%x", getFrom(p));
-        }
-    }
-
     bool isAckorReply = (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) &&
                         (p->decoded.request_id != 0 || p->decoded.reply_id != 0);
     if (isAckorReply) {
@@ -174,8 +207,9 @@ static inline uint8_t myLastByte()
 /* Check if we should be rebroadcasting this packet if so, do so. */
 bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
 {
-    if (isToUs(p) || isFromUs(p) || p->hop_limit == 0 || p->id == 0)
+    if (isToUs(p) || isFromUs(p) || p->hop_limit == 0 || p->id == 0) {
         return false;
+    }
 
     if (!isRebroadcaster()) {
         LOG_DEBUG("No rebroadcast: Role = CLIENT_MUTE or Rebroadcast Mode = NONE");
