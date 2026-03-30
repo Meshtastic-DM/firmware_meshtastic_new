@@ -2,6 +2,7 @@
 
 #include "FloodingRouter.h"
 #include <unordered_map>
+#include <unordered_set>
 
 /**
  * An identifier for a globally unique message - a pair of the sending nodenum and the packet id assigned
@@ -96,6 +97,7 @@ class NextHopRouter : public FloodingRouter
      * Pending retransmissions
      */
     std::unordered_map<GlobalPacketId, PendingPacket, GlobalPacketIdHashFunction> pending;
+    std::unordered_set<NodeNum> aodvNodes;
 
     /**
      * Should this incoming filter be dropped?

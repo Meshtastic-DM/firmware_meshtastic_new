@@ -137,6 +137,14 @@ bool NextHopRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
 
 void NextHopRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtastic_Routing *c)
 {
+    if (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
+        p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP) {
+        auto insertedNode = aodvNodes.insert(getFrom(p));
+        if (insertedNode.second) {
+            LOG_INFO("AODV NODE LEARNED: node=0x%x", getFrom(p));
+        }
+    }
+
     bool isAckorReply = (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) &&
                         (p->decoded.request_id != 0 || p->decoded.reply_id != 0);
     if (isAckorReply) {
@@ -243,21 +251,76 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
         return true;
     }
 
-    // Case C: Unicast packet with no next_hop set. If we now have a route, route it.
+    // Case C: Unicast packet with no next_hop set.
     const bool isAodvControl =
         (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) &&
         (p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP);
+    if (isAodvControl) {
+        const uint8_t recoveredNextHop = getNextHop(p->to, p->relay_node, false);
+        if (recoveredNextHop == NO_NEXT_HOP_PREFERENCE) {
+            LOG_INFO("AODV NO_NEXT_HOP: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
+                     p->to, p->from, p->relay_node, me);
+            return false;
+        }
+
+        LOG_INFO("AODV REROUTE: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, route_next_hop=0x%02x",
+                 p->to, p->from, p->relay_node, me, recoveredNextHop);
+
+        meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
+
+        // We are forwarding now
+        tosend->relay_node = me;
+
+        // Decrement hop_limit using shared logic
+        if (shouldDecrementHopLimit(p)) {
+            tosend->hop_limit--;
+        }
+
+#if USERPREFS_EVENT_MODE
+        if (tosend->hop_limit > 2) {
+            tosend->hop_start -= (tosend->hop_limit - 2);
+            tosend->hop_limit = 2;
+        }
+#endif
+
+        // NextHopRouter::send() will recompute next_hop for the next leg.
+        NextHopRouter::send(tosend);
+        return true;
+    }
+
+    if (aodvNodes.find(getFrom(p)) == aodvNodes.end()) {
+        meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
+
+        LOG_INFO("DM FALLBACK_FLOOD: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
+                 p->to, p->from, p->relay_node, me);
+
+        if (shouldDecrementHopLimit(p)) {
+            tosend->hop_limit--;
+        } else {
+            LOG_INFO("favorite-ROUTER/CLIENT_BASE-to-ROUTER/CLIENT_BASE rebroadcast: preserving hop_limit");
+        }
+
+#if USERPREFS_EVENT_MODE
+        if (tosend->hop_limit > 2) {
+            tosend->hop_start -= (tosend->hop_limit - 2);
+            tosend->hop_limit = 2;
+        }
+#endif
+
+        FloodingRouter::send(tosend);
+        return true;
+    }
+
     const uint8_t recoveredNextHop = getNextHop(p->to, p->relay_node, false);
-    const uint8_t sourceNextHop = isAodvControl ? NO_NEXT_HOP_PREFERENCE : getNextHop(p->from, me, false);
-    if (recoveredNextHop == NO_NEXT_HOP_PREFERENCE ||
-        (!isAodvControl && sourceNextHop == NO_NEXT_HOP_PREFERENCE)) {
-        LOG_INFO("DM NO_NEXT_HOP: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, is_aodv=%d, route_to_dest=0x%02x, route_to_src=0x%02x",
-                 p->to, p->from, p->relay_node, me, isAodvControl, recoveredNextHop, sourceNextHop);
+    const uint8_t sourceNextHop = getNextHop(p->from, me, false);
+    if (recoveredNextHop == NO_NEXT_HOP_PREFERENCE || sourceNextHop == NO_NEXT_HOP_PREFERENCE) {
+        LOG_INFO("DM AODV_DROP_NO_ROUTE: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, route_to_dest=0x%02x, route_to_src=0x%02x",
+                 p->to, p->from, p->relay_node, me, recoveredNextHop, sourceNextHop);
         return false;
     }
 
-    LOG_INFO("DM REROUTE: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, is_aodv=%d, route_next_hop=0x%02x, route_to_src=0x%02x",
-             p->to, p->from, p->relay_node, me, isAodvControl, recoveredNextHop, sourceNextHop);
+    LOG_INFO("DM AODV_REROUTE: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, route_next_hop=0x%02x, route_to_src=0x%02x",
+             p->to, p->from, p->relay_node, me, recoveredNextHop, sourceNextHop);
 
     meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
 
