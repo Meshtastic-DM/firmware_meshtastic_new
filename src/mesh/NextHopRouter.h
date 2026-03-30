@@ -98,6 +98,7 @@ class NextHopRouter : public FloodingRouter
      */
     std::unordered_map<GlobalPacketId, PendingPacket, GlobalPacketIdHashFunction> pending;
     std::unordered_set<NodeNum> aodvNodes;
+    std::unordered_set<NodeNum> legacyNodes;
 
     /**
      * Should this incoming filter be dropped?

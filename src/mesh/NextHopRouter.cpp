@@ -288,8 +288,38 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
         return true;
     }
 
+    if (legacyNodes.find(p->to) != legacyNodes.end()) {
+        meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
+
+        LOG_INFO("DM LEGACY_FALLBACK_FLOOD: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
+                 p->to, p->from, p->relay_node, me);
+
+        if (shouldDecrementHopLimit(p)) {
+            tosend->hop_limit--;
+        } else {
+            LOG_INFO("favorite-ROUTER/CLIENT_BASE-to-ROUTER/CLIENT_BASE rebroadcast: preserving hop_limit");
+        }
+
+#if USERPREFS_EVENT_MODE
+        if (tosend->hop_limit > 2) {
+            tosend->hop_start -= (tosend->hop_limit - 2);
+            tosend->hop_limit = 2;
+        }
+#endif
+
+        FloodingRouter::send(tosend);
+        return true;
+    }
+
     if (aodvNodes.find(getFrom(p)) == aodvNodes.end()) {
         meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
+
+        if (p->from != getNodeNum()) {
+            auto insertedLegacy = legacyNodes.insert(p->from);
+            if (insertedLegacy.second) {
+                LOG_INFO("LEGACY NODE LEARNED: node=0x%x", p->from);
+            }
+        }
 
         LOG_INFO("DM FALLBACK_FLOOD: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
                  p->to, p->from, p->relay_node, me);
