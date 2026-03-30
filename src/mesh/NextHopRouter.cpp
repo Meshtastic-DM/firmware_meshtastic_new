@@ -244,15 +244,20 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
     }
 
     // Case C: Unicast packet with no next_hop set. If we now have a route, route it.
-    const uint8_t recoveredNextHop = getNextHop(p->to, me);
-    if (recoveredNextHop == NO_NEXT_HOP_PREFERENCE) {
-        LOG_INFO("DM NO_NEXT_HOP: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
-                 p->to, p->from, p->relay_node, me);
+    const bool isAodvControl =
+        (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) &&
+        (p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP);
+    const uint8_t recoveredNextHop = getNextHop(p->to, p->relay_node, false);
+    const uint8_t sourceNextHop = isAodvControl ? NO_NEXT_HOP_PREFERENCE : getNextHop(p->from, me, false);
+    if (recoveredNextHop == NO_NEXT_HOP_PREFERENCE ||
+        (!isAodvControl && sourceNextHop == NO_NEXT_HOP_PREFERENCE)) {
+        LOG_INFO("DM NO_NEXT_HOP: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, is_aodv=%d, route_to_dest=0x%02x, route_to_src=0x%02x",
+                 p->to, p->from, p->relay_node, me, isAodvControl, recoveredNextHop, sourceNextHop);
         return false;
     }
 
-    LOG_INFO("DM REROUTE: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, route_next_hop=0x%02x",
-             p->to, p->from, p->relay_node, me, recoveredNextHop);
+    LOG_INFO("DM REROUTE: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, is_aodv=%d, route_next_hop=0x%02x, route_to_src=0x%02x",
+             p->to, p->from, p->relay_node, me, isAodvControl, recoveredNextHop, sourceNextHop);
 
     meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
 
@@ -280,7 +285,7 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
  * Get the next hop for a destination using AODV routing
  * @return the node number of the next hop, 0 if no preference (fallback to FloodingRouter)
  */
-uint8_t NextHopRouter::getNextHop(NodeNum to, uint8_t relay_node)
+uint8_t NextHopRouter::getNextHop(NodeNum to, uint8_t relay_node, bool refreshRouteOnUse)
 {
     if (isBroadcast(to))
         return NO_NEXT_HOP_PREFERENCE;
@@ -295,7 +300,9 @@ uint8_t NextHopRouter::getNextHop(NodeNum to, uint8_t relay_node)
                          to, route->nextHop, route->hopCount, (route->expiryTime - millis()) / 1000);
                 
                 // Extend route expiry when actively used (keep-alive)
-                aodvModule->getRouteTable()->refreshRouteOnUse(to);
+                if (refreshRouteOnUse) {
+                    aodvModule->getRouteTable()->refreshRouteOnUse(to);
+                }
                 
                 return route->nextHop;
             } else {
