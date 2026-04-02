@@ -770,20 +770,26 @@ bool PhoneAPI::wasSeenRecently(uint32_t id)
 /**
  * Handle a packet that the phone wants us to send.  It is our responsibility to free the packet to the pool
  */
+#if defined(ARCH_PORTDUINO) || defined(__INTELLISENSE__)
+#include "platform/portduino/SimRadio.h"
+#endif
+
 bool PhoneAPI::handleToRadioPacket(meshtastic_MeshPacket &p)
 {
     printPacket("PACKET FROM PHONE", &p);
     const bool isDecodedPacket = p.which_payload_variant == meshtastic_MeshPacket_decoded_tag;
 
 #if defined(ARCH_PORTDUINO) || defined(__INTELLISENSE__)
-#include "platform/portduino/SimRadio.h"
+    if (SimRadio::instance == nullptr && p.id > 0 && wasSeenRecently(p.id)) {
+        LOG_DEBUG("Ignore packet from phone, already seen recently");
+        return false;
+    }
+#else
+    if (p.id > 0 && wasSeenRecently(p.id)) {
+        LOG_DEBUG("Ignore packet from phone, already seen recently");
+        return false;
+    }
 #endif
-
-    if (SimRadio::instance == nullptr)
-        if (p.id > 0 && wasSeenRecently(p.id)) {
-            LOG_DEBUG("Ignore packet from phone, already seen recently");
-            return false;
-        }
 
     if (isDecodedPacket && p.decoded.portnum == meshtastic_PortNum_TRACEROUTE_APP && lastPortNumToRadio[p.decoded.portnum] &&
         Throttle::isWithinTimespanMs(lastPortNumToRadio[p.decoded.portnum], THIRTY_SECONDS_MS)) {
