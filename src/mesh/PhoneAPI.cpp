@@ -775,10 +775,11 @@ bool PhoneAPI::handleToRadioPacket(meshtastic_MeshPacket &p)
     printPacket("PACKET FROM PHONE", &p);
     const bool isDecodedPacket = p.which_payload_variant == meshtastic_MeshPacket_decoded_tag;
 
-#if defined(ARCH_PORTDUINO)
-    // For use with the simulator, we should not ignore duplicate packets from the phone
-    if (SimRadio::instance == nullptr)
+#if defined(ARCH_PORTDUINO) || defined(__INTELLISENSE__)
+#include "platform/portduino/SimRadio.h"
 #endif
+
+    if (SimRadio::instance == nullptr)
         if (p.id > 0 && wasSeenRecently(p.id)) {
             LOG_DEBUG("Ignore packet from phone, already seen recently");
             return false;

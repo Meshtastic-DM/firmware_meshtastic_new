@@ -63,6 +63,10 @@ Allocator<meshtastic_QueueStatus> &queueStatusPool = staticQueueStatusPool;
 
 #include "Router.h"
 
+#if defined(ARCH_PORTDUINO) || defined(__INTELLISENSE__)
+#include "platform/portduino/SimRadio.h"
+#endif
+
 MeshService::MeshService()
 #ifdef ARCH_PORTDUINO
     : toPhoneQueue(MAX_RX_TOPHONE), toPhoneQueueStatusQueue(MAX_RX_QUEUESTATUS_TOPHONE),
@@ -177,7 +181,7 @@ NodeNum MeshService::getNodenumFromRequestId(uint32_t request_id)
  */
 void MeshService::handleToRadio(meshtastic_MeshPacket &p)
 {
-#if defined(ARCH_PORTDUINO)
+#if defined(ARCH_PORTDUINO) || defined(__INTELLISENSE__)
     if (SimRadio::instance) {
         bool isSimulatorWrappedPacket =
             p.which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
@@ -185,7 +189,6 @@ void MeshService::handleToRadio(meshtastic_MeshPacket &p)
         bool isInjectedCiphertextPacket = p.which_payload_variant == meshtastic_MeshPacket_encrypted_tag;
 
         if (isSimulatorWrappedPacket || isInjectedCiphertextPacket) {
-            // Simulates device received a packet via the LoRa chip
             SimRadio::instance->unpackAndReceive(p);
             return;
         }
