@@ -412,6 +412,8 @@ std::string MeshPacketSerializer::JsonSerialize(const meshtastic_MeshPacket *mp,
     jsonObj["to"] = new JSONValue((unsigned int)mp->to);
     jsonObj["from"] = new JSONValue((unsigned int)mp->from);
     jsonObj["channel"] = new JSONValue((unsigned int)mp->channel);
+    jsonObj["relay_node"] = new JSONValue((unsigned int)mp->relay_node);
+    jsonObj["next_hop"] = new JSONValue((unsigned int)mp->next_hop);
     jsonObj["type"] = new JSONValue(msgType.c_str());
     jsonObj["sender"] = new JSONValue(nodeDB->getNodeId().c_str());
     if (mp->rx_rssi != 0)
@@ -444,6 +446,8 @@ std::string MeshPacketSerializer::JsonSerializeEncrypted(const meshtastic_MeshPa
     jsonObj["to"] = new JSONValue((unsigned int)mp->to);
     jsonObj["from"] = new JSONValue((unsigned int)mp->from);
     jsonObj["channel"] = new JSONValue((unsigned int)mp->channel);
+    jsonObj["relay_node"] = new JSONValue((unsigned int)mp->relay_node);
+    jsonObj["next_hop"] = new JSONValue((unsigned int)mp->next_hop);
     jsonObj["want_ack"] = new JSONValue(mp->want_ack);
 
     if (mp->rx_rssi != 0)
