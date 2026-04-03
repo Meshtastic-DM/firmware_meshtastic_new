@@ -31,6 +31,7 @@
 #endif
 #include "Throttle.h"
 #include <RTC.h>
+#include <new>
 
 // Flag to indicate a heartbeat was received and we should send queue status
 bool heartbeatReceived = false;
@@ -69,10 +70,22 @@ void PhoneAPI::handleStartConfig()
         state = STATE_SEND_MY_INFO;
     }
     pauseBluetoothLogging = true;
-    spiLock->lock();
-    filesManifest = getFiles("/", 10);
-    spiLock->unlock();
-    LOG_DEBUG("Got %d files in manifest", filesManifest.size());
+
+    // Node-only sync does not need file manifest and can avoid a large heap allocation.
+    if (config_nonce == SPECIAL_NONCE_ONLY_NODES) {
+        filesManifest.clear();
+        LOG_DEBUG("Skip files manifest for node-only config request");
+    } else {
+        try {
+            concurrency::LockGuard guard(spiLock);
+            filesManifest = getFiles("/", 10);
+            LOG_DEBUG("Got %d files in manifest", filesManifest.size());
+        } catch (const std::bad_alloc &) {
+            // Avoid reboot on low-memory manifests; continue with empty manifest.
+            filesManifest.clear();
+            LOG_ERROR("Out of memory while building files manifest, continuing without manifest");
+        }
+    }
 
     LOG_INFO("Start API client config millis=%u", millis());
     // Protect against concurrent BLE callbacks: they run in NimBLE's FreeRTOS task and also touch nodeInfoQueue.
