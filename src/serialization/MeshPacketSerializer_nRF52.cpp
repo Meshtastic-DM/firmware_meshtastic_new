@@ -342,9 +342,10 @@ std::string MeshPacketSerializer::JsonSerialize(const meshtastic_MeshPacket *mp,
             return "";
             break;
         }
-    } else if (shouldLog) {
-        LOG_WARN("Couldn't convert encrypted payload of MeshPacket to JSON");
-        return "";
+    } else {
+        if (shouldLog)
+            LOG_WARN("Couldn't convert encrypted payload of MeshPacket to JSON");
+        msgType = "PKI";
     }
 
     jsonObj["id"] = (unsigned int)mp->id;
@@ -391,6 +392,7 @@ std::string MeshPacketSerializer::JsonSerializeEncrypted(const meshtastic_MeshPa
     jsonObj["channel"] = (unsigned int)mp->channel;
     jsonObj["relay_node"] = (unsigned int)mp->relay_node;
     jsonObj["next_hop"] = (unsigned int)mp->next_hop;
+    jsonObj["type"] = "PKI";
     jsonObj["want_ack"] = mp->want_ack;
 
     if (mp->rx_rssi != 0)
