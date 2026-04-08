@@ -3,9 +3,7 @@
 #include "JSON.h"
 #include "NodeDB.h"
 #include "mesh/generated/meshtastic/mqtt.pb.h"
-#include "mesh/generated/meshtastic/aodv.pb.h"
 #include "mesh/generated/meshtastic/telemetry.pb.h"
-#include "mesh/generated/meshtastic/sdn.pb.h"
 #include "modules/RoutingModule.h"
 #include <DebugConfiguration.h>
 #include <mesh-pb-constants.h>
@@ -398,70 +396,6 @@ std::string MeshPacketSerializer::JsonSerialize(const meshtastic_MeshPacket *mp,
                 }
             } else if (shouldLog) {
                 LOG_ERROR(errStr, "RemoteHardware");
-            }
-            break;
-        }
-        case meshtastic_PortNum_AODV_ROUTING_APP: {
-            meshtastic_AODV scratch;
-            memset(&scratch, 0, sizeof(scratch));
-            if (pb_decode_from_bytes(mp->decoded.payload.bytes, mp->decoded.payload.size, &meshtastic_AODV_msg, &scratch)) {
-                switch (scratch.which_variant) {
-                case meshtastic_AODV_rreq_tag:
-                    msgType = "AODV_RREQ";
-                    msgPayload["destination"] = new JSONValue((unsigned int)scratch.variant.rreq.destination);
-                    jsonObj["payload"] = new JSONValue(msgPayload);
-                    break;
-                case meshtastic_AODV_rrep_tag:
-                    msgType = "AODV_RREP";
-                    break;
-                case meshtastic_AODV_rerr_tag:
-                    msgType = "AODV_RERR";
-                    break;
-                default:
-                    msgType = "AODV";
-                    break;
-                }
-            } else {
-                msgType = "AODV";
-                if (shouldLog)
-                    LOG_ERROR(errStr, "AODV");
-            }
-            break;
-        }
-        case meshtastic_PortNum_SDN_APP: {
-            meshtastic_SDN scratch;
-            memset(&scratch, 0, sizeof(scratch));
-            if (pb_decode_from_bytes(mp->decoded.payload.bytes, mp->decoded.payload.size, &meshtastic_SDN_msg, &scratch)) {
-                switch (scratch.which_payload_variant) {
-                case meshtastic_SDN_announcement_tag:
-                    msgType = "SDN_ANN";
-                    break;
-                case meshtastic_SDN_route_update_tag:
-                    msgType = "SDN_UPDATE";
-                    break;
-                case meshtastic_SDN_route_install_tag:
-                    msgType = "SDN_INSTALL";
-                    break;
-                case meshtastic_SDN_route_set_tag:
-                    msgType = "SDN_SET";
-                    break;
-                case meshtastic_SDN_route_set_confirm_tag:
-                    msgType = "SDN_CONFIRM";
-                    break;
-                case meshtastic_SDN_link_quality_tag:
-                    msgType = "SDN_LINK";
-                    break;
-                case meshtastic_SDN_route_command_tag:
-                    msgType = "SDN_COMMAND";
-                    break;
-                default:
-                    msgType = "SDN";
-                    break;
-                }
-            } else {
-                msgType = "SDN";
-                if (shouldLog)
-                    LOG_ERROR(errStr, "SDN");
             }
             break;
         }
