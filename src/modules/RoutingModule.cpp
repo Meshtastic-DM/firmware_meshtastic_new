@@ -30,9 +30,10 @@ bool RoutingModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mesh
     printPacket("Routing sniffing", &mp);
     router->sniffReceived(&mp, r);
 
-    // FIXME - move this to a non promsicious PhoneAPI module?
-    // Note: we are careful not to send back packets that started with the phone back to the phone
-    if ((isBroadcast(mp.to) || isToUs(&mp)) && (mp.from != 0)) {
+    // Note: we are careful not to send back packets that started with the phone back to the phone.
+    // For serial API clients, also expose forwarded transit packets (promiscuous RX).
+    bool shouldDeliverToApi = isBroadcast(mp.to) || isToUs(&mp) || service->api_state == MeshService::STATE_SERIAL;
+    if (shouldDeliverToApi && (mp.from != 0)) {
         printPacket("Delivering rx packet", &mp);
         service->handleFromRadio(&mp);
     }
