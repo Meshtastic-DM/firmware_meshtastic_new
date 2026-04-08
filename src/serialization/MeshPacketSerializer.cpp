@@ -352,33 +352,6 @@ std::string MeshPacketSerializer::JsonSerialize(const meshtastic_MeshPacket *mp,
             }
             break;
         }
-        case meshtastic_PortNum_ROUTING_APP: {
-            meshtastic_Routing scratch = meshtastic_Routing_init_default;
-            if (pb_decode_from_bytes(mp->decoded.payload.bytes, mp->decoded.payload.size, &meshtastic_Routing_msg, &scratch)) {
-                msgPayload["request_id"] = new JSONValue((unsigned int)mp->decoded.request_id);
-                switch (scratch.which_variant) {
-                case meshtastic_Routing_route_request_tag:
-                    msgType = "ACK_REQUEST";
-                    break;
-                case meshtastic_Routing_route_reply_tag:
-                    msgType = "ACK_REPLY";
-                    break;
-                case meshtastic_Routing_error_reason_tag:
-                    msgPayload["error_reason"] = new JSONValue((int)scratch.error_reason);
-                    msgType = (scratch.error_reason == meshtastic_Routing_Error_NONE) ? "ACK" : "NAK";
-                    break;
-                default:
-                    msgType = "ROUTING";
-                    break;
-                }
-                jsonObj["payload"] = new JSONValue(msgPayload);
-            } else {
-                msgType = "ROUTING";
-                if (shouldLog)
-                    LOG_ERROR(errStr, "Routing");
-            }
-            break;
-        }
         case meshtastic_PortNum_DETECTION_SENSOR_APP: {
             msgType = "detection";
             char payloadStr[(mp->decoded.payload.size) + 1];
