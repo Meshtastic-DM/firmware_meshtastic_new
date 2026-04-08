@@ -182,6 +182,11 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
      * Note: SDN controller uses admin_key[0] (slot 0) for priority access
      */
     void installAdminKey();
+
+    /**
+     * Reset per-relay link quality counters after a report is sent.
+     */
+    void resetLinkQualityCounters();
 };
 
 extern SDNModule *sdnModule;

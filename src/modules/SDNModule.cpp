@@ -923,7 +923,17 @@ void SDNModule::sendLinkQualityReports()
     }
     
     router->sendLocal(p);
+    resetLinkQualityCounters();
     lastLinkQualityReport = millis();
+}
+
+void SDNModule::resetLinkQualityCounters()
+{
+    for (auto &entry : neighborStats) {
+        entry.second.rxGood = 0;
+        entry.second.rxBad = 0;
+    }
+    LOG_DEBUG("SDN: Reset link quality counters after report send");
 }
 
 void SDNModule::handleSDNLinkQuality(const meshtastic_MeshPacket &mp, const meshtastic_SDNLinkQuality &lq)
