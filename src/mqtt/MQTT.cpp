@@ -700,15 +700,15 @@ void MQTT::publishQueuedMessages()
     if (!moduleConfig.mqtt.proxy_to_client_enabled && !isConnected)
         return;
 
-    LOG_DEBUG("Publish enqueued MQTT message (JSON-only mode)");
+    LOG_DEBUG("Publish enqueued MQTT message");
     const std::unique_ptr<QueueEntry> entry(mqttQueue.dequeuePtr(0));
+    LOG_INFO("publish %s, %u bytes from queue", entry->topic.c_str(), entry->envBytes.size());
+    publish(entry->topic.c_str(), entry->envBytes.data(), entry->envBytes.size(), false);
 
 #if !defined(ARCH_NRF52) ||                                                                                                      \
     defined(NRF52_USE_JSON) // JSON is not supported on nRF52, see issue #2804 ### Fixed by using ArduinoJson ###
-    if (!moduleConfig.mqtt.json_enabled) {
-        LOG_WARN("JSON-only MQTT mode is active but json_enabled=false, dropping queued message");
+    if (!moduleConfig.mqtt.json_enabled)
         return;
-    }
 
     // handle json topic
     const DecodedServiceEnvelope env(entry->envBytes.data(), entry->envBytes.size());
@@ -794,7 +794,8 @@ void MQTT::onSend(const meshtastic_MeshPacket &mp_encrypted, const meshtastic_Me
     std::string topic = cryptTopic + channelId + "/" + nodeId;
 
     if (moduleConfig.mqtt.proxy_to_client_enabled || this->isConnectedDirectly()) {
-        LOG_DEBUG("MQTT JSON-only mode active, skip protobuf publish %s", topic.c_str());
+        LOG_DEBUG("MQTT Publish %s, %u bytes", topic.c_str(), numBytes);
+        publish(topic.c_str(), bytes, numBytes, false);
 
 #if !defined(ARCH_NRF52) ||                                                                                                      \
     defined(NRF52_USE_JSON) // JSON is not supported on nRF52, see issue #2804 ### Fixed by using ArduinoJson ###
