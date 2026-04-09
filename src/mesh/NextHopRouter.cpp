@@ -9,16 +9,42 @@
 
 NextHopRouter::NextHopRouter() {}
 
+static inline meshtastic_NodeInfoLite *getNodeInfo(NodeNum node)
+{
+    if (!nodeDB || node == 0) {
+        return nullptr;
+    }
+    return nodeDB->getMeshNode(node);
+}
+
+static inline bool isRoutingCapable(NodeNum node)
+{
+    const meshtastic_NodeInfoLite *info = getNodeInfo(node);
+    return info && (info->bitfield & NODEINFO_BITFIELD_ROUTING_CAPABLE_MASK);
+}
+
+static inline bool isLegacy(NodeNum node)
+{
+    const meshtastic_NodeInfoLite *info = getNodeInfo(node);
+    return info && (info->bitfield & NODEINFO_BITFIELD_LEGACY_MASK);
+}
+
 void NextHopRouter::learnRoutingCapableNode(NodeNum node, const char *source)
 {
     if (node == 0 || node == getNodeNum()) {
         return;
     }
 
-    auto insertedNode = aodvNodes.insert(node);
-    legacyNodes.erase(node);
+    meshtastic_NodeInfoLite *info = getNodeInfo(node);
+    if (!info) {
+        return;
+    }
 
-    if (insertedNode.second) {
+    const bool insertedNode = !(info->bitfield & NODEINFO_BITFIELD_ROUTING_CAPABLE_MASK);
+    info->bitfield |= NODEINFO_BITFIELD_ROUTING_CAPABLE_MASK;
+    info->bitfield &= ~NODEINFO_BITFIELD_LEGACY_MASK;
+
+    if (insertedNode) {
         if (source && source[0]) {
             LOG_INFO("%s NODE LEARNED: node=0x%x", source, node);
         } else {
@@ -29,12 +55,19 @@ void NextHopRouter::learnRoutingCapableNode(NodeNum node, const char *source)
 
 void NextHopRouter::learnLegacyNode(NodeNum node, const char *source)
 {
-    if (node == 0 || node == getNodeNum() || aodvNodes.find(node) != aodvNodes.end()) {
+    if (node == 0 || node == getNodeNum() || isRoutingCapable(node)) {
         return;
     }
 
-    auto insertedLegacy = legacyNodes.insert(node);
-    if (insertedLegacy.second) {
+    meshtastic_NodeInfoLite *info = getNodeInfo(node);
+    if (!info) {
+        return;
+    }
+
+    const bool insertedLegacy = !(info->bitfield & NODEINFO_BITFIELD_LEGACY_MASK);
+    info->bitfield |= NODEINFO_BITFIELD_LEGACY_MASK;
+
+    if (insertedLegacy) {
         if (source && source[0]) {
             LOG_INFO("%s NODE LEARNED: node=0x%x", source, node);
         } else {
@@ -93,7 +126,7 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
 
     // Legacy nodes do not participate in AODV route discovery. Keep next_hop unset so this send falls back to flooding.
     if (isFromUs(p) && !isBroadcast(p->to) && p->next_hop == NO_NEXT_HOP_PREFERENCE &&
-        !isAodvControl && !isSdnControl && !isRoutingCtrl && legacyNodes.find(p->to) != legacyNodes.end()) {
+        !isAodvControl && !isSdnControl && !isRoutingCtrl && isLegacy(p->to)) {
         LOG_INFO("DATA LEGACY_SEND_FLOOD: dest=0x%x, id=0x%x", p->to, p->id);
         return Router::send(p);
     }
@@ -322,7 +355,7 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
         return true;
     }
 
-    if (legacyNodes.find(p->to) != legacyNodes.end()) {
+    if (isLegacy(p->to)) {
         meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
 
         LOG_INFO("DM LEGACY_FALLBACK_FLOOD: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
@@ -345,14 +378,11 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
         return true;
     }
 
-    if (aodvNodes.find(getFrom(p)) == aodvNodes.end()) {
+    if (!isRoutingCapable(getFrom(p))) {
         meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
 
         if (p->from != getNodeNum()) {
-            auto insertedLegacy = legacyNodes.insert(p->from);
-            if (insertedLegacy.second) {
-                LOG_INFO("LEGACY NODE LEARNED: node=0x%x", p->from);
-            }
+            learnLegacyNode(p->from);
         }
 
         LOG_INFO("DM FALLBACK_FLOOD: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
