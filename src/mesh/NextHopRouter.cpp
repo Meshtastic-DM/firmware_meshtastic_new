@@ -9,6 +9,40 @@
 
 NextHopRouter::NextHopRouter() {}
 
+void NextHopRouter::learnRoutingCapableNode(NodeNum node, const char *source)
+{
+    if (node == 0 || node == getNodeNum()) {
+        return;
+    }
+
+    auto insertedNode = aodvNodes.insert(node);
+    legacyNodes.erase(node);
+
+    if (insertedNode.second) {
+        if (source && source[0]) {
+            LOG_INFO("%s NODE LEARNED: node=0x%x", source, node);
+        } else {
+            LOG_INFO("ROUTING NODE LEARNED: node=0x%x", node);
+        }
+    }
+}
+
+void NextHopRouter::learnLegacyNode(NodeNum node, const char *source)
+{
+    if (node == 0 || node == getNodeNum() || aodvNodes.find(node) != aodvNodes.end()) {
+        return;
+    }
+
+    auto insertedLegacy = legacyNodes.insert(node);
+    if (insertedLegacy.second) {
+        if (source && source[0]) {
+            LOG_INFO("%s NODE LEARNED: node=0x%x", source, node);
+        } else {
+            LOG_INFO("LEGACY NODE LEARNED: node=0x%x", node);
+        }
+    }
+}
+
 PendingPacket::PendingPacket(meshtastic_MeshPacket *p, uint8_t numRetransmissions)
 {
     packet = p;
@@ -55,6 +89,13 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
                          p->decoded.portnum, p->to, p->next_hop, p->id);
             }
         }
+    }
+
+    // Legacy nodes do not participate in AODV route discovery. Keep next_hop unset so this send falls back to flooding.
+    if (isFromUs(p) && !isBroadcast(p->to) && p->next_hop == NO_NEXT_HOP_PREFERENCE &&
+        !isAodvControl && !isSdnControl && !isRoutingCtrl && legacyNodes.find(p->to) != legacyNodes.end()) {
+        LOG_INFO("DATA LEGACY_SEND_FLOOD: dest=0x%x, id=0x%x", p->to, p->id);
+        return Router::send(p);
     }
 
     // If no route exists and we're sending from local node, trigger AODV route discovery
@@ -166,8 +207,9 @@ static inline uint8_t myLastByte()
 /* Check if we should be rebroadcasting this packet if so, do so. */
 bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
 {
-    if (isToUs(p) || isFromUs(p) || p->hop_limit == 0 || p->id == 0)
+    if (isToUs(p) || isFromUs(p) || p->hop_limit == 0 || p->id == 0) {
         return false;
+    }
 
     if (!isRebroadcaster()) {
         LOG_DEBUG("No rebroadcast: Role = CLIENT_MUTE or Rebroadcast Mode = NONE");
@@ -243,18 +285,134 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
         return true;
     }
 
-    // Case C: Unicast packet with no next_hop set (route missing)
-    // For now, just log this case. A future change can check for a route and fall back to flooding.
-    LOG_INFO("DM NO_NEXT_HOP: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
-             p->to, p->from, p->relay_node, me);
-    return false;
+    // Case C: Unicast packet with no next_hop set.
+    const bool isAodvControl =
+        (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) &&
+        (p->decoded.portnum == meshtastic_PortNum_AODV_ROUTING_APP);
+    if (isAodvControl) {
+        const uint8_t recoveredNextHop = getNextHop(p->to, p->relay_node, false);
+        if (recoveredNextHop == NO_NEXT_HOP_PREFERENCE) {
+            LOG_INFO("AODV NO_NEXT_HOP: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
+                     p->to, p->from, p->relay_node, me);
+            return false;
+        }
+
+        LOG_INFO("AODV REROUTE: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, route_next_hop=0x%02x",
+                 p->to, p->from, p->relay_node, me, recoveredNextHop);
+
+        meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
+
+        // We are forwarding now
+        tosend->relay_node = me;
+
+        // Decrement hop_limit using shared logic
+        if (shouldDecrementHopLimit(p)) {
+            tosend->hop_limit--;
+        }
+
+#if USERPREFS_EVENT_MODE
+        if (tosend->hop_limit > 2) {
+            tosend->hop_start -= (tosend->hop_limit - 2);
+            tosend->hop_limit = 2;
+        }
+#endif
+
+        // NextHopRouter::send() will recompute next_hop for the next leg.
+        NextHopRouter::send(tosend);
+        return true;
+    }
+
+    if (legacyNodes.find(p->to) != legacyNodes.end()) {
+        meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
+
+        LOG_INFO("DM LEGACY_FALLBACK_FLOOD: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
+                 p->to, p->from, p->relay_node, me);
+
+        if (shouldDecrementHopLimit(p)) {
+            tosend->hop_limit--;
+        } else {
+            LOG_INFO("favorite-ROUTER/CLIENT_BASE-to-ROUTER/CLIENT_BASE rebroadcast: preserving hop_limit");
+        }
+
+#if USERPREFS_EVENT_MODE
+        if (tosend->hop_limit > 2) {
+            tosend->hop_start -= (tosend->hop_limit - 2);
+            tosend->hop_limit = 2;
+        }
+#endif
+
+        FloodingRouter::send(tosend);
+        return true;
+    }
+
+    if (aodvNodes.find(getFrom(p)) == aodvNodes.end()) {
+        meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
+
+        if (p->from != getNodeNum()) {
+            auto insertedLegacy = legacyNodes.insert(p->from);
+            if (insertedLegacy.second) {
+                LOG_INFO("LEGACY NODE LEARNED: node=0x%x", p->from);
+            }
+        }
+
+        LOG_INFO("DM FALLBACK_FLOOD: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x",
+                 p->to, p->from, p->relay_node, me);
+
+        if (shouldDecrementHopLimit(p)) {
+            tosend->hop_limit--;
+        } else {
+            LOG_INFO("favorite-ROUTER/CLIENT_BASE-to-ROUTER/CLIENT_BASE rebroadcast: preserving hop_limit");
+        }
+
+#if USERPREFS_EVENT_MODE
+        if (tosend->hop_limit > 2) {
+            tosend->hop_start -= (tosend->hop_limit - 2);
+            tosend->hop_limit = 2;
+        }
+#endif
+
+        FloodingRouter::send(tosend);
+        return true;
+    }
+
+    const uint8_t recoveredNextHop = getNextHop(p->to, p->relay_node, false);
+    const uint8_t sourceNextHop = getNextHop(p->from, me, false);
+    if (recoveredNextHop == NO_NEXT_HOP_PREFERENCE || sourceNextHop == NO_NEXT_HOP_PREFERENCE) {
+        LOG_INFO("DM AODV_DROP_NO_ROUTE: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, route_to_dest=0x%02x, route_to_src=0x%02x",
+                 p->to, p->from, p->relay_node, me, recoveredNextHop, sourceNextHop);
+        return false;
+    }
+
+    LOG_INFO("DM AODV_REROUTE: dest=0x%x, from=0x%x, relay=0x%02x, me=0x%02x, route_next_hop=0x%02x, route_to_src=0x%02x",
+             p->to, p->from, p->relay_node, me, recoveredNextHop, sourceNextHop);
+
+    meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
+
+    // We are forwarding now
+    tosend->relay_node = me;
+
+    // Decrement hop_limit using shared logic
+    if (shouldDecrementHopLimit(p)) {
+        tosend->hop_limit--;
+    }
+
+#if USERPREFS_EVENT_MODE
+    if (tosend->hop_limit > 2) {
+        tosend->hop_start -= (tosend->hop_limit - 2);
+        tosend->hop_limit = 2;
+    }
+#endif
+
+    // NextHopRouter::send() will recompute next_hop for the next leg.
+    NextHopRouter::send(tosend);
+    return true;
 }
 
 /**
  * Get the next hop for a destination using AODV routing
  * @return the node number of the next hop, 0 if no preference (fallback to FloodingRouter)
  */
-uint8_t NextHopRouter::getNextHop(NodeNum to, uint8_t relay_node)
+uint8_t NextHopRouter::getNextHop(NodeNum to, uint8_t relay_node, bool refreshRouteOnUse)
 {
     if (isBroadcast(to))
         return NO_NEXT_HOP_PREFERENCE;
@@ -269,7 +427,9 @@ uint8_t NextHopRouter::getNextHop(NodeNum to, uint8_t relay_node)
                          to, route->nextHop, route->hopCount, (route->expiryTime - millis()) / 1000);
                 
                 // Extend route expiry when actively used (keep-alive)
-                aodvModule->getRouteTable()->refreshRouteOnUse(to);
+                if (refreshRouteOnUse) {
+                    aodvModule->getRouteTable()->refreshRouteOnUse(to);
+                }
                 
                 return route->nextHop;
             } else {

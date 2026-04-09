@@ -63,6 +63,18 @@ class Router : protected concurrency::OSThread, protected PacketHistory
     meshtastic_QueueStatus getQueueStatus();
 
     /**
+     * Mark a node as supporting advanced routing features such as AODV or SDN.
+     * The base router does nothing; routers that track this state can override it.
+     */
+    virtual void learnRoutingCapableNode(NodeNum node, const char *source = nullptr) {}
+
+    /**
+     * Mark a node as legacy when it sends us data without participating in AODV/SDN routing.
+     * The base router does nothing; routers that track this state can override it.
+     */
+    virtual void learnLegacyNode(NodeNum node, const char *source = nullptr) {}
+
+    /**
      * @return our local nodenum */
     NodeNum getNodeNum();
 

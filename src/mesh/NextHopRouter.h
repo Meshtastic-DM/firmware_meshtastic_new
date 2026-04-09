@@ -2,6 +2,7 @@
 
 #include "FloodingRouter.h"
 #include <unordered_map>
+#include <unordered_set>
 
 /**
  * An identifier for a globally unique message - a pair of the sending nodenum and the packet id assigned
@@ -73,6 +74,9 @@ class NextHopRouter : public FloodingRouter
      */
     virtual ErrorCode send(meshtastic_MeshPacket *p) override;
 
+    virtual void learnRoutingCapableNode(NodeNum node, const char *source = nullptr) override;
+    virtual void learnLegacyNode(NodeNum node, const char *source = nullptr) override;
+
     /** Do our retransmission handling */
     virtual int32_t runOnce() override
     {
@@ -96,6 +100,8 @@ class NextHopRouter : public FloodingRouter
      * Pending retransmissions
      */
     std::unordered_map<GlobalPacketId, PendingPacket, GlobalPacketIdHashFunction> pending;
+    std::unordered_set<NodeNum> aodvNodes;
+    std::unordered_set<NodeNum> legacyNodes;
 
     /**
      * Should this incoming filter be dropped?
@@ -146,7 +152,7 @@ class NextHopRouter : public FloodingRouter
      * Get the next hop for a destination, given the relay node
      * @return the node number of the next hop, 0 if no preference (fallback to FloodingRouter)
      */
-    uint8_t getNextHop(NodeNum to, uint8_t relay_node);
+    uint8_t getNextHop(NodeNum to, uint8_t relay_node, bool refreshRouteOnUse = true);
 
     /** Check if we should be rebroadcasting this packet if so, do so.
      *  @return true if we did rebroadcast */

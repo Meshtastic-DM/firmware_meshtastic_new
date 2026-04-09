@@ -22,6 +22,10 @@ AODVModule::AODVModule()
 
 bool AODVModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_AODV *aodv)
 {
+    if (router) {
+        router->learnRoutingCapableNode(getFrom(&mp), "AODV");
+    }
+
     // Process based on message type
     switch (aodv->which_variant) {
     case meshtastic_AODV_rreq_tag:

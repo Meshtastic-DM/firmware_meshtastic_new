@@ -712,6 +712,9 @@ void Router::handleReceived(meshtastic_MeshPacket *p, RxSource src)
             p->decoded.portnum != meshtastic_PortNum_ROUTING_APP && !isFromUs(p)) {
             LOG_INFO("DATA AODV RECV: port=%d, from=0x%x, id=0x%x, hops=%d", 
                      p->decoded.portnum, p->from, p->id, p->hop_start - p->hop_limit);
+            if (p->next_hop == NO_NEXT_HOP_PREFERENCE && p->from != 0) {
+                learnLegacyNode(p->from, "LEGACY");
+            }
         }
         
         // parsing was successful, queue for our recipient

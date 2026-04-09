@@ -177,6 +177,10 @@ SDNModule::SDNModule()
 
 bool SDNModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_SDN *sdn)
 {
+    if (router) {
+        router->learnRoutingCapableNode(getFrom(&mp), "SDN");
+    }
+
     switch (sdn->which_payload_variant) {
     case meshtastic_SDN_announcement_tag:
         handleSDNAnnouncement(mp, sdn->payload_variant.announcement);
