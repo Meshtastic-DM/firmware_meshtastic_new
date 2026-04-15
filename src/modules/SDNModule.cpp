@@ -6,6 +6,7 @@
 #include "RTC.h"
 #include "airtime.h"
 #include "configuration.h"
+#include "mesh/RoutingMode.h"
 #include <pb_encode.h>
 #include <SHA256.h>
 #include <vector>
@@ -133,6 +134,51 @@ static uint64_t packHopPath(const std::vector<uint8_t> &hops)
     return packed;
 }
 
+static meshtastic_SDNRoutingMode_Mode toProtoRoutingMode(RoutingMode mode)
+{
+    return mode == RoutingMode::MANAGED_FLOODING ? meshtastic_SDNRoutingMode_Mode_SDN_ROUTING_MODE_MANAGED_FLOODING
+                                                 : meshtastic_SDNRoutingMode_Mode_SDN_ROUTING_MODE_AODV;
+}
+
+static RoutingMode fromProtoRoutingMode(meshtastic_SDNRoutingMode_Mode mode)
+{
+    return mode == meshtastic_SDNRoutingMode_Mode_SDN_ROUTING_MODE_MANAGED_FLOODING ? RoutingMode::MANAGED_FLOODING
+                                                                                     : RoutingMode::AODV;
+}
+
+static void clearLearnedManagedFloodingNextHops()
+{
+    if (!nodeDB) {
+        return;
+    }
+
+    for (size_t i = 0; i < nodeDB->getNumMeshNodes(); ++i) {
+        meshtastic_NodeInfoLite *node = nodeDB->getMeshNodeByIndex(i);
+        if (node) {
+            node->next_hop = NO_NEXT_HOP_PREFERENCE;
+        }
+    }
+}
+
+static void applyRoutingMode(RoutingMode mode, const char *reason)
+{
+    RoutingMode oldMode = getRoutingMode();
+    if (oldMode == mode) {
+        LOG_INFO("SDN: Routing mode unchanged at %s (%s)", routingModeToString(mode), reason ? reason : "no reason");
+        return;
+    }
+
+    setRoutingMode(mode);
+
+    if (aodvModule) {
+        aodvModule->resetState();
+    }
+    clearLearnedManagedFloodingNextHops();
+
+    LOG_INFO("SDN: Routing mode changed %s -> %s (%s)",
+             routingModeToString(oldMode), routingModeToString(mode), reason ? reason : "no reason");
+}
+
 SDNModule::SDNModule()
     : ProtobufModule("sdn", meshtastic_PortNum_SDN_APP, &meshtastic_SDN_msg),
       concurrency::OSThread("SDNModule"),
@@ -203,6 +249,9 @@ bool SDNModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtast
     case meshtastic_SDN_link_quality_tag:
         handleSDNLinkQuality(mp, sdn->payload_variant.link_quality);
         break;
+    case meshtastic_SDN_routing_mode_tag:
+        handleSDNRoutingMode(mp, sdn->payload_variant.routing_mode);
+        break;
     default:
         LOG_WARN("SDN: Unknown message variant");
         break;
@@ -259,7 +308,7 @@ void SDNModule::handleSDNAnnouncement(const meshtastic_MeshPacket &mp, const mes
     sdnControllerNode = controllerNode;
 
     // Install/update reverse route to authenticated controller (same pattern as AODV RREQ handling)
-    if (aodvModule && aodvModule->getRouteTable()) {
+    if (getRoutingMode() == RoutingMode::AODV && aodvModule && aodvModule->getRouteTable()) {
         uint8_t hopCount = mp.hop_start - mp.hop_limit;
         uint8_t prevHop = mp.relay_node; // already last-byte
         if (prevHop == 0) {
@@ -362,6 +411,11 @@ void SDNModule::installAdminKey()
 
 void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteUpdate &update)
 {
+    if (getRoutingMode() != RoutingMode::AODV) {
+        LOG_DEBUG("SDN: Ignoring route update while mode=%s", routingModeToString(getRoutingMode()));
+        return;
+    }
+
     // If we are the next hop, add reverse route to reporter node via relay
     uint8_t ourLastByte = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
     if (mp.next_hop == ourLastByte) {
@@ -395,6 +449,11 @@ void SDNModule::handleSDNRouteUpdate(const meshtastic_MeshPacket &mp, const mesh
 
 void SDNModule::handleSDNRouteCommand(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteCommand &cmd)
 {
+    if (getRoutingMode() != RoutingMode::AODV) {
+        LOG_WARN("SDN: Ignoring route command while mode=%s", routingModeToString(getRoutingMode()));
+        return;
+    }
+
     // Ignore route commands not addressed to us
     if (mp.to != nodeDB->getNodeNum()) {
         LOG_DEBUG("SDN: Ignoring route command not addressed to us (to=0x%x, us=0x%x)",
@@ -421,6 +480,20 @@ void SDNModule::handleSDNRouteCommand(const meshtastic_MeshPacket &mp, const mes
         LOG_WARN("SDN: Failed to activate backup route for dest=0x%x via next_hop=0x%x",
                  cmd.destination, cmd.next_hop);
     }
+}
+
+void SDNModule::handleSDNRoutingMode(const meshtastic_MeshPacket &mp, const meshtastic_SDNRoutingMode &modeMsg)
+{
+    if (!isBroadcast(mp.to) && mp.to != nodeDB->getNodeNum()) {
+        LOG_DEBUG("SDN: Ignoring routing mode message not addressed to us or broadcast (to=0x%x, us=0x%x)",
+                  mp.to, nodeDB->getNodeNum());
+        return;
+    }
+
+    RoutingMode newMode = fromProtoRoutingMode(modeMsg.mode);
+    LOG_INFO("SDN: Received routing mode command from 0x%x: mode=%s",
+             mp.from, routingModeToString(newMode));
+    applyRoutingMode(newMode, "controller command");
 }
 
 void SDNModule::sendAnnouncement()
@@ -594,8 +667,46 @@ void SDNModule::sendRouteCommand(uint32_t targetNode, uint32_t destination, uint
     router->sendLocal(p);
 }
 
+void SDNModule::sendRoutingMode(uint32_t targetNode, RoutingMode mode)
+{
+    if (targetNode == 0) {
+        LOG_WARN("SDN: Invalid target node for routing mode command");
+        return;
+    }
+
+    meshtastic_SDNRoutingMode modeMsg = meshtastic_SDNRoutingMode_init_default;
+    modeMsg.mode = toProtoRoutingMode(mode);
+
+    meshtastic_SDN sdn = meshtastic_SDN_init_default;
+    sdn.which_payload_variant = meshtastic_SDN_routing_mode_tag;
+    sdn.payload_variant.routing_mode = modeMsg;
+
+    meshtastic_MeshPacket *p = router->allocForSending();
+    p->to = targetNode;
+    p->decoded.portnum = meshtastic_PortNum_SDN_APP;
+    p->channel = channels.getPrimaryIndex();
+    p->want_ack = false;
+    p->hop_limit = config.lora.hop_limit;
+
+    p->decoded.payload.size = pb_encode_to_bytes(
+        p->decoded.payload.bytes,
+        sizeof(p->decoded.payload.bytes),
+        &meshtastic_SDN_msg,
+        &sdn
+    );
+
+    LOG_INFO("SDN: Sending routing mode command to 0x%x: mode=%s",
+             targetNode, routingModeToString(mode));
+    router->sendLocal(p);
+}
+
 void SDNModule::handleSDNRouteInstall(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteInstall &install)
 {
+    if (getRoutingMode() != RoutingMode::AODV) {
+        LOG_WARN("SDN: Ignoring RouteInstall while mode=%s", routingModeToString(getRoutingMode()));
+        return;
+    }
+
     // Verify message is addressed to us
     if (mp.to != nodeDB->getNodeNum()) {
         LOG_DEBUG("SDN: RouteInstall not addressed to us (to=0x%x, us=0x%x)", mp.to, nodeDB->getNodeNum());
@@ -660,6 +771,11 @@ void SDNModule::handleSDNRouteInstall(const meshtastic_MeshPacket &mp, const mes
 
 void SDNModule::handleSDNRouteSet(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteSet &routeSet)
 {
+    if (getRoutingMode() != RoutingMode::AODV) {
+        LOG_WARN("SDN: Ignoring RouteSet while mode=%s", routingModeToString(getRoutingMode()));
+        return;
+    }
+
     uint8_t hopCount = getHopCount(routeSet.hop_path);
     if (hopCount == 0) {
         LOG_WARN("SDN: Empty hop_path in RouteSet");
@@ -744,6 +860,8 @@ void SDNModule::handleSDNRouteSet(const meshtastic_MeshPacket &mp, const meshtas
 
 void SDNModule::handleSDNRouteSetConfirm(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteSetConfirm &confirm)
 {
+    (void)mp;
+
     // Only controller should receive confirmations
     if (!isSDNController) {
         LOG_DEBUG("SDN: RouteSetConfirm received but not controller, ignoring");
@@ -836,6 +954,11 @@ void SDNModule::recordReception(uint8_t relayNode, bool success)
 
 void SDNModule::sendLinkQualityReports()
 {
+    if (getRoutingMode() == RoutingMode::MANAGED_FLOODING) {
+        LOG_DEBUG("SDN: Skipping link quality reports while mode=%s", routingModeToString(getRoutingMode()));
+        return;
+    }
+
     // Check prerequisites
     if (!sdnAuthenticated || sdnControllerNode == 0) {
         LOG_DEBUG("SDN: Controller not authenticated, skipping link quality reports");

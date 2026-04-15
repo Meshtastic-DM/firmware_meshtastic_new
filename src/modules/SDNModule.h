@@ -4,6 +4,7 @@
 #include "concurrency/OSThread.h"
 #include "configuration.h"
 #include "mesh/generated/meshtastic/sdn.pb.h"
+#include "mesh/RoutingMode.h"
 #include <map>
 
 /**
@@ -100,6 +101,11 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
      * Handle route set confirmation from destination
      */
     void handleSDNRouteSetConfirm(const meshtastic_MeshPacket &mp, const meshtastic_SDNRouteSetConfirm &confirm);
+
+    /**
+     * Handle routing mode control from controller
+     */
+    void handleSDNRoutingMode(const meshtastic_MeshPacket &mp, const meshtastic_SDNRoutingMode &modeMsg);
     
     /**
      * Handle link quality metrics from nodes
@@ -120,6 +126,7 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
      * Send route command to target node (activate backup path)
      */
     void sendRouteCommand(uint32_t targetNode, uint32_t destination, uint8_t nextHop);
+    void sendRoutingMode(uint32_t targetNode, RoutingMode mode);
     
     /**
      * Send route installation command to start node

@@ -5,6 +5,7 @@
 #include "Router.h"
 #include "SDNModule.h"
 #include "configuration.h"
+#include "mesh/RoutingMode.h"
 
 AODVModule *aodvModule;
 
@@ -22,6 +23,11 @@ AODVModule::AODVModule()
 
 bool AODVModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_AODV *aodv)
 {
+    if (getRoutingMode() != RoutingMode::AODV) {
+        LOG_DEBUG("AODV: Ignoring control packet while mode=%s", routingModeToString(getRoutingMode()));
+        return false;
+    }
+
     if (router) {
         router->learnRoutingCapableNode(getFrom(&mp), "AODV");
     }
@@ -260,6 +266,13 @@ void AODVModule::handleRouteError(const meshtastic_MeshPacket &mp, const meshtas
 
 void AODVModule::initiateRouteDiscovery(uint32_t destination, meshtastic_MeshPacket *packet)
 {
+    if (getRoutingMode() != RoutingMode::AODV) {
+        LOG_INFO("AODV: Skipping route discovery for 0x%x while mode=%s",
+                 destination, routingModeToString(getRoutingMode()));
+        packetPool.release(packet);
+        return;
+    }
+
     // Check if RREQ already pending
     if (routeTable.hasPendingRREQ(destination)) {
         LOG_DEBUG("AODV: RREQ already pending for 0x%x, buffering packet", destination);
@@ -322,6 +335,12 @@ void AODVModule::initiateRouteDiscovery(uint32_t destination, meshtastic_MeshPac
 
 void AODVModule::handleLinkFailure(uint32_t destination)
 {
+    if (getRoutingMode() != RoutingMode::AODV) {
+        LOG_DEBUG("AODV: Ignoring link failure for 0x%x while mode=%s",
+                  destination, routingModeToString(getRoutingMode()));
+        return;
+    }
+
     LOG_INFO("AODV: Link failure detected for 0x%x", destination);
 
     // Get precursors who need to be notified
@@ -520,6 +539,14 @@ void AODVModule::cleanupSeenRREQs()
             ++originatorIt;
         }
     }
+}
+
+void AODVModule::resetState()
+{
+    routeTable.reset();
+    seenRREQs.clear();
+    lastCleanupTime = 0;
+    LOG_INFO("AODV: Module state reset");
 }
 
 meshtastic_MeshPacket *AODVModule::allocReply()

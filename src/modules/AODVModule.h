@@ -52,6 +52,7 @@ class AODVModule : public ProtobufModule<meshtastic_AODV>, public concurrency::O
 
     // Called when link failure detected (no ACK after retries)
     void handleLinkFailure(uint32_t destination);
+    void resetState();
 
     // MeshModule overrides
     virtual bool handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_AODV *aodv) override;
