@@ -430,6 +430,24 @@ void AODVRouteTable::removeExpiredBufferedPackets()
     }
 }
 
+void AODVRouteTable::reset()
+{
+    for (auto &entry : packetBuffer) {
+        for (auto &buffered : entry.second) {
+            packetPool.release(buffered.packet);
+        }
+    }
+
+    routes.clear();
+    pendingRREQs.clear();
+    packetBuffer.clear();
+    rreqRateLimit.clear();
+    mySeqNum = 1;
+    nextRREQId = 1;
+
+    LOG_INFO("AODV: Route table state reset");
+}
+
 void AODVRouteTable::dumpRoutes() const
 {
     int totalRoutes = 0;

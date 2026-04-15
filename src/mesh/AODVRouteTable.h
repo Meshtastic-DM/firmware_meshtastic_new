@@ -131,6 +131,7 @@ class AODVRouteTable
     void clearBufferedPackets(uint32_t destination);
     void clearBufferedPacketsWithoutFreeing(uint32_t destination); // Transfer ownership without freeing
     void removeExpiredBufferedPackets();
+    void reset();
 
     // Utility
     void cleanup(); // Periodic cleanup of expired entries
