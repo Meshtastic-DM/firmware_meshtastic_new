@@ -76,7 +76,7 @@ void AODVRouteTable::updateRoute(uint32_t destination, uint8_t nextHop, uint8_t 
         auto &routeList = it->second;
         
         // Check if this is a new sequence number (fresher route)
-        if (!routeList.empty() && destSeqNum != 0 && destSeqNum > routeList[0].destSeqNum) {
+        if (!routeList.empty() && destSeqNum != 0 && destSeqNum != routeList[0].destSeqNum) {
             // Clear old routes - new seq invalidates all old routes
             LOG_INFO("AODV: New seq %u > old %u, clearing old routes to 0x%x", 
                      destSeqNum, routeList[0].destSeqNum, destination);
