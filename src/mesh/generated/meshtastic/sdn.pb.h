@@ -9,6 +9,12 @@
 #error Regenerate this file with the current version of nanopb generator.
 #endif
 
+/* Enum definitions */
+typedef enum _meshtastic_SDNRoutingMode_Mode {
+    meshtastic_SDNRoutingMode_Mode_SDN_ROUTING_MODE_AODV = 0,
+    meshtastic_SDNRoutingMode_Mode_SDN_ROUTING_MODE_MANAGED_FLOODING = 1
+} meshtastic_SDNRoutingMode_Mode;
+
 /* Struct definitions */
 typedef PB_BYTES_ARRAY_T(16) meshtastic_SDNAnnouncement_hmac_hash_t;
 typedef PB_BYTES_ARRAY_T(32) meshtastic_SDNAnnouncement_public_key_t;
@@ -142,6 +148,10 @@ typedef struct _meshtastic_SDNLinkQuality {
     float air_util_tx;
 } meshtastic_SDNLinkQuality;
 
+typedef struct _meshtastic_SDNRoutingMode {
+    meshtastic_SDNRoutingMode_Mode mode;
+} meshtastic_SDNRoutingMode;
+
 /* *
  SDN message wrapper */
 typedef struct _meshtastic_SDN {
@@ -154,6 +164,7 @@ typedef struct _meshtastic_SDN {
         meshtastic_SDNRouteSet route_set;
         meshtastic_SDNRouteSetConfirm route_set_confirm;
         meshtastic_SDNLinkQuality link_quality;
+        meshtastic_SDNRoutingMode routing_mode;
     } payload_variant;
 } meshtastic_SDN;
 
@@ -161,6 +172,22 @@ typedef struct _meshtastic_SDN {
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Helper constants for enums */
+#define _meshtastic_SDNRoutingMode_Mode_MIN meshtastic_SDNRoutingMode_Mode_SDN_ROUTING_MODE_AODV
+#define _meshtastic_SDNRoutingMode_Mode_MAX meshtastic_SDNRoutingMode_Mode_SDN_ROUTING_MODE_MANAGED_FLOODING
+#define _meshtastic_SDNRoutingMode_Mode_ARRAYSIZE ((meshtastic_SDNRoutingMode_Mode)(meshtastic_SDNRoutingMode_Mode_SDN_ROUTING_MODE_MANAGED_FLOODING+1))
+
+
+
+
+
+
+
+
+#define meshtastic_SDNRoutingMode_mode_ENUMTYPE meshtastic_SDNRoutingMode_Mode
+
+
 
 /* Initializer values for message structs */
 #define meshtastic_SDNAnnouncement_init_default  {{0, {0}}, {0, {0}}, 0, 0}
@@ -170,6 +197,7 @@ extern "C" {
 #define meshtastic_SDNRouteSet_init_default      {0, 0, 0}
 #define meshtastic_SDNRouteSetConfirm_init_default {0, 0, 0, ""}
 #define meshtastic_SDNLinkQuality_init_default   {0, {0, 0, 0}, 0, {0, 0, 0}, 0, {0, 0, 0}, 0, 0}
+#define meshtastic_SDNRoutingMode_init_default   {_meshtastic_SDNRoutingMode_Mode_MIN}
 #define meshtastic_SDN_init_default              {0, {meshtastic_SDNAnnouncement_init_default}}
 #define meshtastic_SDNAnnouncement_init_zero     {{0, {0}}, {0, {0}}, 0, 0}
 #define meshtastic_SDNRouteUpdate_init_zero      {0, 0, 0, 0, 0}
@@ -178,6 +206,7 @@ extern "C" {
 #define meshtastic_SDNRouteSet_init_zero         {0, 0, 0}
 #define meshtastic_SDNRouteSetConfirm_init_zero  {0, 0, 0, ""}
 #define meshtastic_SDNLinkQuality_init_zero      {0, {0, 0, 0}, 0, {0, 0, 0}, 0, {0, 0, 0}, 0, 0}
+#define meshtastic_SDNRoutingMode_init_zero      {_meshtastic_SDNRoutingMode_Mode_MIN}
 #define meshtastic_SDN_init_zero                 {0, {meshtastic_SDNAnnouncement_init_zero}}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -207,6 +236,7 @@ extern "C" {
 #define meshtastic_SDNLinkQuality_rx_bad_tag     3
 #define meshtastic_SDNLinkQuality_channel_utilization_tag 4
 #define meshtastic_SDNLinkQuality_air_util_tx_tag 5
+#define meshtastic_SDNRoutingMode_mode_tag       1
 #define meshtastic_SDN_announcement_tag          1
 #define meshtastic_SDN_route_update_tag          2
 #define meshtastic_SDN_route_command_tag         3
@@ -214,6 +244,7 @@ extern "C" {
 #define meshtastic_SDN_route_set_tag             5
 #define meshtastic_SDN_route_set_confirm_tag     6
 #define meshtastic_SDN_link_quality_tag          7
+#define meshtastic_SDN_routing_mode_tag          8
 
 /* Struct field encoding specification for nanopb */
 #define meshtastic_SDNAnnouncement_FIELDLIST(X, a) \
@@ -270,6 +301,11 @@ X(a, STATIC,   SINGULAR, FLOAT,    air_util_tx,       5)
 #define meshtastic_SDNLinkQuality_CALLBACK NULL
 #define meshtastic_SDNLinkQuality_DEFAULT NULL
 
+#define meshtastic_SDNRoutingMode_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UENUM,    mode,              1)
+#define meshtastic_SDNRoutingMode_CALLBACK NULL
+#define meshtastic_SDNRoutingMode_DEFAULT NULL
+
 #define meshtastic_SDN_FIELDLIST(X, a) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,announcement,payload_variant.announcement),   1) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_update,payload_variant.route_update),   2) \
@@ -277,7 +313,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_command,payload_varian
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_install,payload_variant.route_install),   4) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_set,payload_variant.route_set),   5) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,route_set_confirm,payload_variant.route_set_confirm),   6) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,link_quality,payload_variant.link_quality),   7)
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,link_quality,payload_variant.link_quality),   7) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,routing_mode,payload_variant.routing_mode),   8)
 #define meshtastic_SDN_CALLBACK NULL
 #define meshtastic_SDN_DEFAULT NULL
 #define meshtastic_SDN_payload_variant_announcement_MSGTYPE meshtastic_SDNAnnouncement
@@ -287,6 +324,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,link_quality,payload_variant
 #define meshtastic_SDN_payload_variant_route_set_MSGTYPE meshtastic_SDNRouteSet
 #define meshtastic_SDN_payload_variant_route_set_confirm_MSGTYPE meshtastic_SDNRouteSetConfirm
 #define meshtastic_SDN_payload_variant_link_quality_MSGTYPE meshtastic_SDNLinkQuality
+#define meshtastic_SDN_payload_variant_routing_mode_MSGTYPE meshtastic_SDNRoutingMode
 
 extern const pb_msgdesc_t meshtastic_SDNAnnouncement_msg;
 extern const pb_msgdesc_t meshtastic_SDNRouteUpdate_msg;
@@ -295,6 +333,7 @@ extern const pb_msgdesc_t meshtastic_SDNRouteInstall_msg;
 extern const pb_msgdesc_t meshtastic_SDNRouteSet_msg;
 extern const pb_msgdesc_t meshtastic_SDNRouteSetConfirm_msg;
 extern const pb_msgdesc_t meshtastic_SDNLinkQuality_msg;
+extern const pb_msgdesc_t meshtastic_SDNRoutingMode_msg;
 extern const pb_msgdesc_t meshtastic_SDN_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
@@ -305,6 +344,7 @@ extern const pb_msgdesc_t meshtastic_SDN_msg;
 #define meshtastic_SDNRouteSet_fields &meshtastic_SDNRouteSet_msg
 #define meshtastic_SDNRouteSetConfirm_fields &meshtastic_SDNRouteSetConfirm_msg
 #define meshtastic_SDNLinkQuality_fields &meshtastic_SDNLinkQuality_msg
+#define meshtastic_SDNRoutingMode_fields &meshtastic_SDNRoutingMode_msg
 #define meshtastic_SDN_fields &meshtastic_SDN_msg
 
 /* Maximum encoded size of messages (where known) */
@@ -316,6 +356,7 @@ extern const pb_msgdesc_t meshtastic_SDN_msg;
 #define meshtastic_SDNRouteSetConfirm_size       55
 #define meshtastic_SDNRouteSet_size              20
 #define meshtastic_SDNRouteUpdate_size           28
+#define meshtastic_SDNRoutingMode_size           2
 #define meshtastic_SDN_size                      66
 
 #ifdef __cplusplus
