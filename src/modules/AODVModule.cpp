@@ -102,18 +102,8 @@ bool AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
         return true; // Stop processing - prevents RoutingModule from rebroadcasting
     }
 
-    // Do we have a route to the destination?
-    AODVRouteEntry *route = routeTable.findRoute(rreq.destination);
-    if (route && route->destSeqNum >= rreq.dest_seq_num) {
-        LOG_INFO("AODV RREQ RECV: from=0x%x, dest=0x%x, ID=%u, have_route via 0x%x", 
-                 rreq.originator, rreq.destination, rreq.rreq_id, route->nextHop);
-        LOG_INFO("AODV RREP SEND: to=0x%x, dest=0x%x, seq=%u, hops=%d, next_hop=0x%x (intermediate)", 
-                 rreq.originator, rreq.destination, route->destSeqNum, route->hopCount, prevHop);
-        sendRREP(rreq.originator, rreq.destination, route->destSeqNum, route->hopCount, prevHop);
-        return false; // Allow rebroadcast by other nodes
-    }
-
-    // Forward RREQ if we're not the destination and don't have a route
+    // Forward RREQ to all nodes that might have route to destination
+    // (No intermediate RREP - let destination respond directly)
     LOG_INFO("AODV RREQ RBCAST: orig=0x%x, dest=0x%x, ID=%u, hops=%d (will be %d after forward)", 
              rreq.originator, rreq.destination, rreq.rreq_id, hopCount, hopCount + 1);
     return false; // Allow RoutingModule to rebroadcast
