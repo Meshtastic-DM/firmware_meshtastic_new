@@ -5,6 +5,7 @@
 #include "modules/TraceRouteModule.h"
 #endif
 #include "NodeDB.h"
+#include "RoutingMode.h"
 #include "modules/AODVModule.h"
 
 NextHopRouter::NextHopRouter() {}
@@ -27,6 +28,11 @@ static inline bool isLegacy(NodeNum node)
 {
     const meshtastic_NodeInfoLite *info = getNodeInfo(node);
     return info && (info->bitfield & NODEINFO_BITFIELD_LEGACY_MASK);
+}
+
+static inline bool isManagedFloodingMode()
+{
+    return getRoutingMode() == RoutingMode::MANAGED_FLOODING;
 }
 
 void NextHopRouter::learnRoutingCapableNode(NodeNum node, const char *source)
@@ -97,14 +103,19 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
     bool isSdnControl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_SDN_APP);
     bool isRoutingCtrl = isDecoded && (p->decoded.portnum == meshtastic_PortNum_ROUTING_APP);
 
-    // Check if this is an AODV control packet from us with explicit next_hop set
-    if (isAodvControl && isFromUs(p) && p->next_hop != NO_NEXT_HOP_PREFERENCE) {
-        // Preserve the next_hop set by AODVModule (for RREP routing)
-        LOG_DEBUG("Preserving AODV control next hop for dest 0x%x to 0x%x", p->to, p->next_hop);
-    } else {
-        // Calculate next_hop using route table or default behavior
+    if (isManagedFloodingMode()) {
         p->next_hop = getNextHop(p->to, p->relay_node);
-        LOG_DEBUG("Setting next hop for packet with dest %x to %x", p->to, p->next_hop);
+        LOG_DEBUG("Managed flooding next hop for packet with dest %x to %x", p->to, p->next_hop);
+    } else {
+        // Check if this is an AODV control packet from us with explicit next_hop set
+        if (isAodvControl && isFromUs(p) && p->next_hop != NO_NEXT_HOP_PREFERENCE) {
+            // Preserve the next_hop set by AODVModule (for RREP routing)
+            LOG_DEBUG("Preserving AODV control next hop for dest 0x%x to 0x%x", p->to, p->next_hop);
+        } else {
+            // Calculate next_hop using route table or default behavior
+            p->next_hop = getNextHop(p->to, p->relay_node);
+            LOG_DEBUG("Setting next hop for packet with dest %x to %x", p->to, p->next_hop);
+        }
     }
     
     // Log data packet routing
@@ -133,7 +144,8 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
 
     // If no route exists and we're sending from local node, trigger AODV route discovery
     // But never trigger discovery for AODV control packets, SDN control packets, or routing protocol packets
-    if (isFromUs(p) && !isBroadcast(p->to) && p->next_hop == NO_NEXT_HOP_PREFERENCE && aodvModule && isDecoded &&
+    if (!isManagedFloodingMode() && isFromUs(p) && !isBroadcast(p->to) && p->next_hop == NO_NEXT_HOP_PREFERENCE &&
+        aodvModule && isDecoded &&
         !isAodvControl && !isSdnControl && !isRoutingCtrl) {
         LOG_INFO("AODV: No route to 0x%x, initiating route discovery", p->to);
         aodvModule->initiateRouteDiscovery(p->to, packetPool.allocCopy(*p));
@@ -174,8 +186,9 @@ bool NextHopRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
 
         if (p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA) {
             rxDupe++;
-            // For packets from us, keep unicast retransmissions until an explicit routing ACK/NAK is received.
-            if (!isFromUs(p) || isBroadcast(p->to) || !p->want_ack) {
+            if (isManagedFloodingMode()) {
+                stopRetransmission(p->from, p->id);
+            } else if (!isFromUs(p) || isBroadcast(p->to) || !p->want_ack) {
                 stopRetransmission(p->from, p->id);
             }
         }
@@ -214,8 +227,25 @@ void NextHopRouter::sniffReceived(const meshtastic_MeshPacket *p, const meshtast
     bool isAckorReply = (p->which_payload_variant == meshtastic_MeshPacket_decoded_tag) &&
                         (p->decoded.request_id != 0 || p->decoded.reply_id != 0);
     if (isAckorReply) {
-        // ACK-based route learning has been REMOVED - AODV manages routes dynamically
-        // Just handle ACK cancellation for rebroadcast and stop retransmissions
+        if (isManagedFloodingMode() && p->from != 0) {
+            NodeNum ourNodeNum = getNodeNum();
+            uint8_t ourRelayID = nodeDB->getLastByteOfNodeNum(ourNodeNum);
+            meshtastic_NodeInfoLite *origTx = nodeDB->getMeshNode(p->from);
+            if (origTx) {
+                bool wasAlreadyRelayer = wasRelayer(p->relay_node, p->decoded.request_id, p->to);
+                bool weWereSoleRelayer = false;
+                bool weWereRelayer = wasRelayer(ourRelayID, p->decoded.request_id, p->to, &weWereSoleRelayer);
+                if ((weWereRelayer && wasAlreadyRelayer) ||
+                    (p->hop_start != 0 && p->hop_start == p->hop_limit && weWereSoleRelayer)) {
+                    if (origTx->next_hop != p->relay_node) {
+                        LOG_INFO("Managed flooding: update next hop of 0x%x to 0x%x based on ACK/reply",
+                                 p->from, p->relay_node);
+                        origTx->next_hop = p->relay_node;
+                    }
+                }
+            }
+        }
+
         if (!isToUs(p)) {
             LOG_DEBUG("ACK/Reply overhear: from=0x%x, to=0x%x, request_id=0x%x, canceling rebroadcast",
                       p->from, p->to, p->decoded.request_id);
@@ -240,6 +270,45 @@ static inline uint8_t myLastByte()
 /* Check if we should be rebroadcasting this packet if so, do so. */
 bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
 {
+    if (isManagedFloodingMode()) {
+        if (!isToUs(p) && !isFromUs(p) && p->hop_limit > 0) {
+            if (p->id != 0) {
+                if (isRebroadcaster()) {
+                    if (p->next_hop == NO_NEXT_HOP_PREFERENCE || p->next_hop == nodeDB->getLastByteOfNodeNum(getNodeNum())) {
+                        meshtastic_MeshPacket *tosend = packetPool.allocCopy(*p);
+                        LOG_INFO("Rebroadcast received message coming from %x", p->relay_node);
+
+                        if (shouldDecrementHopLimit(p)) {
+                            tosend->hop_limit--;
+                        } else {
+                            LOG_INFO("favorite-ROUTER/CLIENT_BASE-to-ROUTER/CLIENT_BASE rebroadcast: preserving hop_limit");
+                        }
+#if USERPREFS_EVENT_MODE
+                        if (tosend->hop_limit > 2) {
+                            tosend->hop_start -= (tosend->hop_limit - 2);
+                            tosend->hop_limit = 2;
+                        }
+#endif
+
+                        if (p->next_hop == NO_NEXT_HOP_PREFERENCE) {
+                            FloodingRouter::send(tosend);
+                        } else {
+                            NextHopRouter::send(tosend);
+                        }
+
+                        return true;
+                    }
+                } else {
+                    LOG_DEBUG("No rebroadcast: Role = CLIENT_MUTE or Rebroadcast Mode = NONE");
+                }
+            } else {
+                LOG_DEBUG("Ignore 0 id broadcast");
+            }
+        }
+
+        return false;
+    }
+
     if (isToUs(p) || isFromUs(p) || p->hop_limit == 0 || p->id == 0) {
         return false;
     }
@@ -447,6 +516,20 @@ uint8_t NextHopRouter::getNextHop(NodeNum to, uint8_t relay_node, bool refreshRo
     if (isBroadcast(to))
         return NO_NEXT_HOP_PREFERENCE;
 
+    if (isManagedFloodingMode()) {
+        meshtastic_NodeInfoLite *node = nodeDB->getMeshNode(to);
+        if (node && node->next_hop) {
+            if (node->next_hop != relay_node) {
+                return node->next_hop;
+            } else {
+                LOG_WARN("Managed flooding next hop for 0x%x is 0x%x, same as relayer; no preference",
+                         to, node->next_hop);
+            }
+        }
+
+        return NO_NEXT_HOP_PREFERENCE;
+    }
+
     // Use AODV route table instead of NodeDB next_hop field
     if (aodvModule) {
         AODVRouteEntry *route = aodvModule->getRouteTable()->findRoute(to);
@@ -572,7 +655,7 @@ int32_t NextHopRouter::doRetransmissions()
                     sendAckNak(meshtastic_Routing_Error_MAX_RETRANSMIT, getFrom(p.packet), p.packet->id, p.packet->channel);
                     
                     // Notify AODV of link failure for route repair
-                    if (aodvModule && !isBroadcast(p.packet->to)) {
+                    if (!isManagedFloodingMode() && aodvModule && !isBroadcast(p.packet->to)) {
                         LOG_INFO("AODV: Notifying link failure for 0x%x", p.packet->to);
                         aodvModule->handleLinkFailure(p.packet->to);
                     }
@@ -585,9 +668,18 @@ int32_t NextHopRouter::doRetransmissions()
                           p.packet->id, p.numRetransmissions);
 
                 if (!isBroadcast(p.packet->to)) {
-                    // For AODV: No fallback to flooding on last retry
-                    // Instead, rely on AODV RERR to propagate and new RREQ to find alternate route
-                    NextHopRouter::send(packetPool.allocCopy(*p.packet));
+                    if (isManagedFloodingMode() && p.numRetransmissions == 1) {
+                        p.packet->next_hop = NO_NEXT_HOP_PREFERENCE;
+                        meshtastic_NodeInfoLite *sentTo = nodeDB->getMeshNode(p.packet->to);
+                        if (sentTo) {
+                            LOG_INFO("Resetting managed flooding next hop for dest 0x%x", p.packet->to);
+                            sentTo->next_hop = NO_NEXT_HOP_PREFERENCE;
+                        }
+                        FloodingRouter::send(packetPool.allocCopy(*p.packet));
+                    } else {
+                        // For AODV: no flooding fallback on retry, rely on route repair.
+                        NextHopRouter::send(packetPool.allocCopy(*p.packet));
+                    }
                 } else {
                     // Note: we call the superclass version because we don't want to have our version of send() add a new
                     // retransmission record
