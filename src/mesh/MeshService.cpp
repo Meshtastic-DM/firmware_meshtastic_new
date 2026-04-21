@@ -183,17 +183,29 @@ void MeshService::handleToRadio(meshtastic_MeshPacket &p)
 {
 #if defined(ARCH_PORTDUINO) || defined(__INTELLISENSE__)
     if (SimRadio::instance) {
-        bool isSimulatorWrappedPacket =
+        const bool isSimulatorWrappedPacket =
             p.which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
             p.decoded.portnum == meshtastic_PortNum_SIMULATOR_APP;
-        bool isInjectedCiphertextPacket = p.which_payload_variant == meshtastic_MeshPacket_encrypted_tag;
+
+        const bool isInjectedCiphertextPacket =
+            p.which_payload_variant == meshtastic_MeshPacket_encrypted_tag;
 
         if (isSimulatorWrappedPacket || isInjectedCiphertextPacket) {
+            if (isSimulatorWrappedPacket) {
+                LOG_INFO("SIMRX type=SIMULATOR_APP id=%u from=%u to=%u",
+                         (unsigned)p.id, (unsigned)p.from, (unsigned)p.to);
+            } else {
+                LOG_INFO("SIMRX type=ENCRYPTED_BRIDGE id=%u from=%u to=%u pki=%u",
+                         (unsigned)p.id, (unsigned)p.from, (unsigned)p.to, (unsigned)p.pki_encrypted);
+            }
+
+            // Simulates device received a packet via the LoRa chip
             SimRadio::instance->unpackAndReceive(p);
             return;
         }
     }
 #endif
+
     p.from = 0;                          // We don't let clients assign nodenums to their sent messages
     p.next_hop = NO_NEXT_HOP_PREFERENCE; // We don't let clients assign next_hop to their sent messages
     p.relay_node = NO_RELAY_NODE;        // We don't let clients assign relay_node to their sent messages
