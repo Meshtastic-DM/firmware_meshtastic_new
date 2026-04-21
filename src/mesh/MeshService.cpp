@@ -183,15 +183,25 @@ void MeshService::handleToRadio(meshtastic_MeshPacket &p)
 {
 #if defined(ARCH_PORTDUINO) || defined(__INTELLISENSE__)
     if (SimRadio::instance) {
+        const bool isDecoded = (p.which_payload_variant == meshtastic_MeshPacket_decoded_tag);
+
         const bool isSimulatorWrappedPacket =
-            p.which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
-            p.decoded.portnum == meshtastic_PortNum_SIMULATOR_APP;
+            isDecoded && (p.decoded.portnum == meshtastic_PortNum_SIMULATOR_APP);
 
         const bool isInjectedCiphertextPacket =
-            p.which_payload_variant == meshtastic_MeshPacket_encrypted_tag;
+            (p.which_payload_variant == meshtastic_MeshPacket_encrypted_tag);
 
-        if (isSimulatorWrappedPacket || isInjectedCiphertextPacket) {
-            if (isSimulatorWrappedPacket) {
+        // NEW: allow injected TEXT packets to enter simulator RX path
+        // (useful when bridge sends physical-network text into simulator node)
+        const bool isInjectedTextForSimulator =
+            isDecoded && (p.decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP) && (p.from != 0);
+
+        if (isSimulatorWrappedPacket || isInjectedCiphertextPacket || isInjectedTextForSimulator) {
+            if (isInjectedTextForSimulator) {
+                LOG_INFO("SIMRX remap TEXT->SIMULATOR id=%u from=%u to=%u",
+                         (unsigned)p.id, (unsigned)p.from, (unsigned)p.to);
+                p.decoded.portnum = meshtastic_PortNum_SIMULATOR_APP;
+            } else if (isSimulatorWrappedPacket) {
                 LOG_INFO("SIMRX type=SIMULATOR_APP id=%u from=%u to=%u",
                          (unsigned)p.id, (unsigned)p.from, (unsigned)p.to);
             } else {
@@ -199,7 +209,6 @@ void MeshService::handleToRadio(meshtastic_MeshPacket &p)
                          (unsigned)p.id, (unsigned)p.from, (unsigned)p.to, (unsigned)p.pki_encrypted);
             }
 
-            // Simulates device received a packet via the LoRa chip
             SimRadio::instance->unpackAndReceive(p);
             return;
         }
