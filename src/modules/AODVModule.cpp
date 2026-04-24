@@ -99,6 +99,9 @@ bool AODVModule::handleRouteRequest(const meshtastic_MeshPacket &mp, const mesht
         sendRREP(rreq.originator, rreq.destination, mySeqNum, 0, prevHop); // 0 hops to ourselves, next_hop is who sent us the RREQ
         // Consume packet to prevent rebroadcast - we are the target
         LOG_DEBUG("AODV: Target consuming RREQ to prevent rebroadcast id=0x%x", mp.id);
+        if (service->api_state == MeshService::STATE_SERIAL) {
+            service->handleFromRadio(&mp);
+        }
         return true; // Stop processing - prevents RoutingModule from rebroadcasting
     }
 

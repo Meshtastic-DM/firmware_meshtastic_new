@@ -200,6 +200,7 @@ class MeshService
     /// needs to keep the packet around it makes a copy
     int handleFromRadio(const meshtastic_MeshPacket *p);
     friend class RoutingModule;
+    friend class AODVModule;
 };
 
 extern MeshService *service;
