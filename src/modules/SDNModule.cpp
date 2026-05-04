@@ -586,14 +586,21 @@ void SDNModule::sendAnnouncement()
 
 void SDNModule::sendRouteUpdate(uint32_t destination, uint8_t nextHop, uint8_t hopCount, uint32_t destSeqNum)
 {
-    if (sdnControllerNode == 0) {
-        LOG_DEBUG("SDN: No controller known, skipping route update");
-        return;
-    }
+    uint32_t targetController = sdnControllerNode;
+    
+    // If we are the controller, send to ourselves
+    if (isSDNController) {
+        targetController = nodeDB->getNodeNum();
+    } else {
+        if (targetController == 0) {
+            LOG_DEBUG("SDN: No controller known, skipping route update");
+            return;
+        }
 
-    if (!sdnAuthenticated) {
-        LOG_DEBUG("SDN: Controller not authenticated, skipping route update");
-        return;
+        if (!sdnAuthenticated) {
+            LOG_DEBUG("SDN: Controller not authenticated, skipping route update");
+            return;
+        }
     }
 
     meshtastic_SDNRouteUpdate update = meshtastic_SDNRouteUpdate_init_default;
@@ -614,7 +621,7 @@ void SDNModule::sendRouteUpdate(uint32_t destination, uint8_t nextHop, uint8_t h
     sdn.payload_variant.route_update = update;
 
     meshtastic_MeshPacket *p = router->allocForSending();
-    p->to = sdnControllerNode;
+    p->to = targetController;
     p->decoded.portnum = meshtastic_PortNum_SDN_APP;
     p->channel = channels.getPrimaryIndex();
     p->want_ack = false;
@@ -628,7 +635,7 @@ void SDNModule::sendRouteUpdate(uint32_t destination, uint8_t nextHop, uint8_t h
     );
 
     LOG_INFO("SDN: Sending route update for dest=0x%x (next_hop=0x%x, hops=%u) to controller 0x%x",
-             destination, nextHop, hopCount, sdnControllerNode);
+             destination, nextHop, hopCount, targetController);
     router->sendLocal(p);
 }
 

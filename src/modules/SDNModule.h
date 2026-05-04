@@ -158,6 +158,11 @@ class SDNModule : public ProtobufModule<meshtastic_SDN>, private concurrency::OS
     bool isControllerAuthenticated() const { return sdnAuthenticated && sdnControllerNode != 0; }
     
     /**
+     * Check if this node is the SDN controller
+     */
+    bool isController() const { return isSDNController; }
+
+    /**
      * Get SDN controller node number
      */
     uint32_t getSDNController() const { return sdnControllerNode; }

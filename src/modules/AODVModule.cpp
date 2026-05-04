@@ -179,7 +179,7 @@ void AODVModule::handleRouteReply(const meshtastic_MeshPacket &mp, const meshtas
     routeTable.addPrecursor(rrep.destination, precursor);
     
     // Send route update to SDN controller if available
-    if (sdnModule && sdnModule->isControllerAuthenticated()) {
+    if (sdnModule && (sdnModule->isControllerAuthenticated() || sdnModule->isController())) {
         sdnModule->sendRouteUpdate(rrep.destination, prevHop, hopCount + 1, rrep.dest_seq_num);
     }
 
