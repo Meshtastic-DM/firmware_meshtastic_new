@@ -23,7 +23,7 @@ class AODVModule : public ProtobufModule<meshtastic_AODV>, public concurrency::O
     std::map<uint32_t, std::map<uint32_t, std::pair<uint32_t, std::vector<std::pair<uint8_t, uint32_t>>>>> seenRREQs;
     
     // Cleanup interval for route table maintenance
-    uint32_t lastCleanupTime;
+    uint32_t lastRouteTablePrintTime;
 
     // RREQ Processing
     bool handleRouteRequest(const meshtastic_MeshPacket &mp, const meshtastic_RouteRequest &rreq);
@@ -40,6 +40,11 @@ class AODVModule : public ProtobufModule<meshtastic_AODV>, public concurrency::O
     // RERR Processing
     void handleRouteError(const meshtastic_MeshPacket &mp, const meshtastic_RouteError &rerr);
     void forwardRERR(const meshtastic_RouteError &rerr);
+
+    // Route Table Query
+    void handleRouteTableRequest(const meshtastic_MeshPacket &mp, const meshtastic_RouteTableRequest &rtReq);
+    void handleRouteTableResponse(const meshtastic_MeshPacket &mp, const meshtastic_RouteTableResponse &rtResp);
+    void sendRouteTableResponse(uint32_t requester, uint32_t requestId);
 
     // Cleanup
     void cleanupSeenRREQs();

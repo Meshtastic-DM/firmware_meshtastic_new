@@ -58,6 +58,39 @@ typedef struct _meshtastic_RouteError {
     meshtastic_UnreachableNode unreachable_destinations[10];
 } meshtastic_RouteError;
 
+/* Route Table Query Request
+ Sent to request a node's routing table */
+typedef struct _meshtastic_RouteTableRequest {
+    /* Request ID for matching request/response */
+    uint32_t request_id;
+} meshtastic_RouteTableRequest;
+
+/* Single route entry in the routing table */
+typedef struct _meshtastic_RouteEntry {
+    /* Destination node number (full 32-bit) */
+    uint32_t destination;
+    /* Next hop node number (full 32-bit) */
+    uint32_t next_hop;
+    /* Number of hops to destination */
+    uint32_t hop_count;
+    /* Destination sequence number */
+    uint32_t destination_seq_num;
+    /* Route lifetime/expiry in seconds */
+    uint32_t lifetime;
+    /* Whether this route is valid */
+    bool valid;
+} meshtastic_RouteEntry;
+
+/* Route Table Response
+ Contains the node's current routing table */
+typedef struct _meshtastic_RouteTableResponse {
+    /* Request ID matching the request */
+    uint32_t request_id;
+    /* List of routes in the routing table */
+    pb_size_t routes_count;
+    meshtastic_RouteEntry routes[20];
+} meshtastic_RouteTableResponse;
+
 /* AODV routing message (top-level wrapper) */
 typedef struct _meshtastic_AODV {
     pb_size_t which_variant;
@@ -65,6 +98,8 @@ typedef struct _meshtastic_AODV {
         meshtastic_RouteRequest rreq;
         meshtastic_RouteReply rrep;
         meshtastic_RouteError rerr;
+        meshtastic_RouteTableRequest rt_request;
+        meshtastic_RouteTableResponse rt_response;
     } variant;
 } meshtastic_AODV;
 
@@ -76,13 +111,19 @@ extern "C" {
 /* Initializer values for message structs */
 #define meshtastic_RouteRequest_init_default     {0, 0, 0, 0, 0, 0}
 #define meshtastic_RouteReply_init_default       {0, 0, 0, 0, 0}
-#define meshtastic_RouteError_init_default       {0, {meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default}}
+#define meshtastic_RouteError_init_default       {0, {meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default, meshtastic_UnreachableNode_init_default}}
 #define meshtastic_UnreachableNode_init_default  {0, 0}
+#define meshtastic_RouteTableRequest_init_default {0}
+#define meshtastic_RouteEntry_init_default       {0, 0, 0, 0, 0, 0}
+#define meshtastic_RouteTableResponse_init_default {0, 0, {meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default, meshtastic_RouteEntry_init_default}}
 #define meshtastic_AODV_init_default             {0, {meshtastic_RouteRequest_init_default}}
 #define meshtastic_RouteRequest_init_zero        {0, 0, 0, 0, 0, 0}
 #define meshtastic_RouteReply_init_zero          {0, 0, 0, 0, 0}
-#define meshtastic_RouteError_init_zero          {0, {meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero}}
+#define meshtastic_RouteError_init_zero          {0, {meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero, meshtastic_UnreachableNode_init_zero}}
 #define meshtastic_UnreachableNode_init_zero     {0, 0}
+#define meshtastic_RouteTableRequest_init_zero   {0}
+#define meshtastic_RouteEntry_init_zero          {0, 0, 0, 0, 0, 0}
+#define meshtastic_RouteTableResponse_init_zero  {0, 0, {meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero, meshtastic_RouteEntry_init_zero}}
 #define meshtastic_AODV_init_zero                {0, {meshtastic_RouteRequest_init_zero}}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -100,9 +141,20 @@ extern "C" {
 #define meshtastic_UnreachableNode_node_num_tag  1
 #define meshtastic_UnreachableNode_seq_num_tag   2
 #define meshtastic_RouteError_unreachable_destinations_tag 1
+#define meshtastic_RouteTableRequest_request_id_tag 1
+#define meshtastic_RouteEntry_destination_tag    1
+#define meshtastic_RouteEntry_next_hop_tag       2
+#define meshtastic_RouteEntry_hop_count_tag      3
+#define meshtastic_RouteEntry_destination_seq_num_tag 4
+#define meshtastic_RouteEntry_lifetime_tag       5
+#define meshtastic_RouteEntry_valid_tag          6
+#define meshtastic_RouteTableResponse_request_id_tag 1
+#define meshtastic_RouteTableResponse_routes_tag 2
 #define meshtastic_AODV_rreq_tag                 1
 #define meshtastic_AODV_rrep_tag                 2
 #define meshtastic_AODV_rerr_tag                 3
+#define meshtastic_AODV_rt_request_tag           4
+#define meshtastic_AODV_rt_response_tag          5
 
 /* Struct field encoding specification for nanopb */
 #define meshtastic_RouteRequest_FIELDLIST(X, a) \
@@ -136,20 +188,49 @@ X(a, STATIC,   SINGULAR, UINT32,   seq_num,           2)
 #define meshtastic_UnreachableNode_CALLBACK NULL
 #define meshtastic_UnreachableNode_DEFAULT NULL
 
+#define meshtastic_RouteTableRequest_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   request_id,        1)
+#define meshtastic_RouteTableRequest_CALLBACK NULL
+#define meshtastic_RouteTableRequest_DEFAULT NULL
+
+#define meshtastic_RouteEntry_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   destination,       1) \
+X(a, STATIC,   SINGULAR, UINT32,   next_hop,          2) \
+X(a, STATIC,   SINGULAR, UINT32,   hop_count,         3) \
+X(a, STATIC,   SINGULAR, UINT32,   destination_seq_num,   4) \
+X(a, STATIC,   SINGULAR, UINT32,   lifetime,          5) \
+X(a, STATIC,   SINGULAR, BOOL,     valid,             6)
+#define meshtastic_RouteEntry_CALLBACK NULL
+#define meshtastic_RouteEntry_DEFAULT NULL
+
+#define meshtastic_RouteTableResponse_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   request_id,        1) \
+X(a, STATIC,   REPEATED, MESSAGE,  routes,            2)
+#define meshtastic_RouteTableResponse_CALLBACK NULL
+#define meshtastic_RouteTableResponse_DEFAULT NULL
+#define meshtastic_RouteTableResponse_routes_MSGTYPE meshtastic_RouteEntry
+
 #define meshtastic_AODV_FIELDLIST(X, a) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (variant,rreq,variant.rreq),   1) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (variant,rrep,variant.rrep),   2) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (variant,rerr,variant.rerr),   3)
+X(a, STATIC,   ONEOF,    MESSAGE,  (variant,rerr,variant.rerr),   3) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (variant,rt_request,variant.rt_request),   4) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (variant,rt_response,variant.rt_response),   5)
 #define meshtastic_AODV_CALLBACK NULL
 #define meshtastic_AODV_DEFAULT NULL
 #define meshtastic_AODV_variant_rreq_MSGTYPE meshtastic_RouteRequest
 #define meshtastic_AODV_variant_rrep_MSGTYPE meshtastic_RouteReply
 #define meshtastic_AODV_variant_rerr_MSGTYPE meshtastic_RouteError
+#define meshtastic_AODV_variant_rt_request_MSGTYPE meshtastic_RouteTableRequest
+#define meshtastic_AODV_variant_rt_response_MSGTYPE meshtastic_RouteTableResponse
 
 extern const pb_msgdesc_t meshtastic_RouteRequest_msg;
 extern const pb_msgdesc_t meshtastic_RouteReply_msg;
 extern const pb_msgdesc_t meshtastic_RouteError_msg;
 extern const pb_msgdesc_t meshtastic_UnreachableNode_msg;
+extern const pb_msgdesc_t meshtastic_RouteTableRequest_msg;
+extern const pb_msgdesc_t meshtastic_RouteEntry_msg;
+extern const pb_msgdesc_t meshtastic_RouteTableResponse_msg;
 extern const pb_msgdesc_t meshtastic_AODV_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
@@ -157,14 +238,20 @@ extern const pb_msgdesc_t meshtastic_AODV_msg;
 #define meshtastic_RouteReply_fields &meshtastic_RouteReply_msg
 #define meshtastic_RouteError_fields &meshtastic_RouteError_msg
 #define meshtastic_UnreachableNode_fields &meshtastic_UnreachableNode_msg
+#define meshtastic_RouteTableRequest_fields &meshtastic_RouteTableRequest_msg
+#define meshtastic_RouteEntry_fields &meshtastic_RouteEntry_msg
+#define meshtastic_RouteTableResponse_fields &meshtastic_RouteTableResponse_msg
 #define meshtastic_AODV_fields &meshtastic_AODV_msg
 
 /* Maximum encoded size of messages (where known) */
 #define MESHTASTIC_MESHTASTIC_AODV_PB_H_MAX_SIZE meshtastic_AODV_size
-#define meshtastic_AODV_size                     143
-#define meshtastic_RouteError_size               140
+#define meshtastic_AODV_size                     689
+#define meshtastic_RouteEntry_size               32
+#define meshtastic_RouteError_size               112
 #define meshtastic_RouteReply_size               30
 #define meshtastic_RouteRequest_size             36
+#define meshtastic_RouteTableRequest_size        6
+#define meshtastic_RouteTableResponse_size       686
 #define meshtastic_UnreachableNode_size          12
 
 #ifdef __cplusplus

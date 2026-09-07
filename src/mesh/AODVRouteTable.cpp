@@ -467,6 +467,4 @@ void AODVRouteTable::cleanup()
             ++it;
         }
     }
-
-    dumpRoutes();
 }
